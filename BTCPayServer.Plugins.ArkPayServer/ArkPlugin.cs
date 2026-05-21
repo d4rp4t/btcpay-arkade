@@ -129,17 +129,81 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         services.AddSingleton<ISafetyService, NArk.Safety.AsyncKeyedLock.AsyncSafetyService>();
 
         // Unified blockchain backend (chain time + boarding-UTXO lookup +
-        // broadcast + tx status + fee estimation). Pass the inner provider's
-        // logger so the cache-fallback warning (emitted when Bitcoin Core
-        // RPC blips and we serve a stale chain time) is visible in plugin
-        // logs rather than swallowed.
-        services.AddSingleton<NBXplorerBlockchain>(provider =>
+        // broadcast + tx status + fee estimation).
+        //
+        // Default backend is NBXplorerBlockchain, which reaches into
+        // ExplorerClient.RPCClient.SendCommandAsync for chain time, fee
+        // estimation, etc.
+        //
+        // When the BTCPay Electrum plugin
+        // (Kukks/BTCPayServerPlugins/Plugins/BTCPayServer.Plugins.Electrum)
+        // is co-installed, it rip-and-replaces NBXplorer's DI registrations
+        // and substitutes its own ExplorerClient shim whose RPCClient is
+        // null — NBXplorerBlockchain would NRE on every chain-time / fee
+        // call. Detect that case by the registered ExplorerClientProvider's
+        // concrete type name and swap in EsploraBlockchain (REST against
+        // the network's default Esplora endpoint) instead.
+        //
+        // The inner provider's logger is passed so the cache-fallback
+        // warning (emitted when the chain-time call fails transiently
+        // and we serve the cached value) is visible in plugin logs
+        // rather than swallowed.
+        services.AddSingleton<IBitcoinBlockchain>(provider =>
         {
             var explorerClientProvider = provider.GetRequiredService<ExplorerClientProvider>();
-            var logger = provider.GetService<ILogger<NBXplorerBlockchain>>();
-            return new NBXplorerBlockchain(explorerClientProvider.GetExplorerClient("BTC"), logger);
+            var providerTypeName = explorerClientProvider.GetType().FullName ?? "";
+
+            // Two complementary signals because either alone is fragile:
+            //  - Type-name "Electrum" catches the documented Electrum plugin
+            //    even if it later wraps the provider in something whose
+            //    RPCClient happens to be non-null.
+            //  - RPCClient == null is the *actual* failure condition for
+            //    NBXplorerBlockchain (it dereferences .RPCClient on every
+            //    chain-time / fee / broadcast call). Any future shim that
+            //    nulls it out — Electrum or otherwise — gets caught here
+            //    rather than NRE'ing in production.
+            var btcExplorer = explorerClientProvider.GetExplorerClient("BTC");
+            var rpcClientNull = btcExplorer?.RPCClient is null;
+            var typeNameLooksElectrum = providerTypeName.Contains("Electrum", StringComparison.OrdinalIgnoreCase);
+            var useEsporaFallback = typeNameLooksElectrum || rpcClientNull;
+
+            var pluginLogger = provider.GetService<ILogger<ArkadePlugin>>();
+
+            if (useEsporaFallback)
+            {
+                var trigger = (typeNameLooksElectrum, rpcClientNull) switch
+                {
+                    (true, true) => "type-name match + RPCClient is null",
+                    (true, false) => "type-name match",
+                    (false, true) => "RPCClient is null on the registered ExplorerClient",
+                    _ => "unknown"
+                };
+
+                var network = provider.GetRequiredService<ArkNetworkConfig>();
+                var esploraUri = network.EsploraUri;
+                if (string.IsNullOrWhiteSpace(esploraUri))
+                {
+                    throw new InvalidOperationException(
+                        $"Detected an NBXplorer-incompatible ExplorerClientProvider ({providerTypeName}, trigger: {trigger}) " +
+                        "but ArkNetworkConfig.EsploraUri is null for this network. " +
+                        "NBXplorerBlockchain reaches into ExplorerClient.RPCClient which the shim does not expose; " +
+                        "the Arkade plugin needs an Esplora endpoint as a fallback. " +
+                        "Set 'esplora' in ark.json or pick a network preset (Mainnet/Mutinynet/Signet/Regtest) that includes it.");
+                }
+
+                var esploraLogger = provider.GetService<ILogger<EsploraBlockchain>>();
+                pluginLogger?.LogInformation(
+                    "NBXplorer-incompatible ExplorerClientProvider detected ({Provider}, trigger: {Trigger}); using EsploraBlockchain at {Uri} for chain time / UTXO lookup / broadcast / fee estimation",
+                    providerTypeName, trigger, esploraUri);
+                return new EsploraBlockchain(new Uri(esploraUri), esploraLogger);
+            }
+
+            var nbxLogger = provider.GetService<ILogger<NBXplorerBlockchain>>();
+            pluginLogger?.LogInformation(
+                "Using NBXplorerBlockchain for chain time / UTXO lookup / broadcast / fee estimation (ExplorerClientProvider: {Provider}, RPCClient: non-null)",
+                providerTypeName);
+            return new NBXplorerBlockchain(btcExplorer, nbxLogger);
         });
-        services.AddSingleton<IBitcoinBlockchain>(sp => sp.GetRequiredService<NBXplorerBlockchain>());
 
         // Intent scheduler
         services.Configure<SimpleIntentSchedulerOptions>(options =>
@@ -282,7 +346,17 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
             ArkUri: !string.IsNullOrEmpty(fileConfig?.ArkUri) ? fileConfig.ArkUri : preset.ArkUri,
             ArkadeWalletUri: !string.IsNullOrEmpty(fileConfig?.ArkadeWalletUri) ? fileConfig.ArkadeWalletUri : preset.ArkadeWalletUri,
             BoltzUri: !string.IsNullOrEmpty(fileConfig?.BoltzUri) ? fileConfig.BoltzUri : preset.BoltzUri,
-            ExplorerUri: !string.IsNullOrEmpty(fileConfig?.ExplorerUri) ? fileConfig.ExplorerUri : preset.ExplorerUri
+            ExplorerUri: !string.IsNullOrEmpty(fileConfig?.ExplorerUri) ? fileConfig.ExplorerUri : preset.ExplorerUri,
+            // EsploraUri / ElectrumWsUri / ElectrumTcpUri arrived in
+            // ArkNetworkConfig via NNark dotnet-sdk#96. They MUST be carried
+            // through here too — otherwise the merge silently nulls the
+            // preset's Esplora endpoint and operators with a custom ark.json
+            // hit the InvalidOperationException in the IBitcoinBlockchain
+            // factory the moment they co-install the Electrum plugin (same
+            // failure mode as v2.1.14's ExplorerUri-merge regression).
+            EsploraUri: !string.IsNullOrEmpty(fileConfig?.EsploraUri) ? fileConfig.EsploraUri : preset.EsploraUri,
+            ElectrumWsUri: !string.IsNullOrEmpty(fileConfig?.ElectrumWsUri) ? fileConfig.ElectrumWsUri : preset.ElectrumWsUri,
+            ElectrumTcpUri: !string.IsNullOrEmpty(fileConfig?.ElectrumTcpUri) ? fileConfig.ElectrumTcpUri : preset.ElectrumTcpUri
         );
     }
 
@@ -299,7 +373,14 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
                 ArkUri: "https://signet.arkade.sh",
                 ArkadeWalletUri: "https://signet.arkade.money",
                 BoltzUri: null,
-                ExplorerUri: "https://explorer.signet.arkade.sh");
+                ExplorerUri: "https://explorer.signet.arkade.sh",
+                // Signet endpoints mirror the canonical ts-sdk defaults
+                // (https://github.com/arkade-os/ts-sdk/blob/main/src/providers/onchain.ts
+                // and electrum.ts). NNark only ships Mainnet/Mutinynet/Regtest
+                // presets so the plugin fills these per-network here.
+                EsploraUri: "https://mempool.signet.arkade.sh/api",
+                ElectrumWsUri: "wss://electrum.signet.arkade.sh",
+                ElectrumTcpUri: "tcp://electrum.signet.arkade.sh:50001");
 
         return null;
     }
