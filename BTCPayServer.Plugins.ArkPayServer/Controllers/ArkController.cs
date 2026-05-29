@@ -121,32 +121,48 @@ public class ArkController(
 
         try
         {
-            var walletSettings = await GetFromInputWallet(model.Wallet);
+            var walletSettings = await GetFromInputWallet(model.Wallet, model.Mode);
 
             if (walletSettings.Wallet is not null)
             {
                 try
                 {
                     var serverInfo = await clientTransport.GetServerInfoAsync(HttpContext.RequestAborted);
-                    var wallet = await WalletFactory.CreateWallet(
-                        walletSettings.Wallet,
-                        walletSettings.Destination,
-                        serverInfo,
-                        HttpContext.RequestAborted);
+
+                    // Watch-only import: walletSettings.Wallet carries the
+                    // account descriptor verbatim. Hand it to NArk's
+                    // CreateWatchOnlyWallet helper (added in dotnet-sdk#107)
+                    // which leaves Secret null on the resulting ArkWalletInfo
+                    // so DefaultWalletProvider.GetSignerAsync returns null
+                    // unless an IRemoteSignerTransport claims the wallet.
+                    // The factory throws on an unparseable descriptor and the
+                    // outer try/catch surfaces that to the form below.
+                    var wallet = walletSettings.IsWatchOnlyDescriptor
+                        ? await WalletFactory.CreateWatchOnlyWallet(
+                            walletSettings.Wallet,
+                            destination: walletSettings.Destination,
+                            serverInfo,
+                            metadata: null,
+                            HttpContext.RequestAborted)
+                        : await WalletFactory.CreateWallet(
+                            walletSettings.Wallet,
+                            walletSettings.Destination,
+                            serverInfo,
+                            HttpContext.RequestAborted);
 
                     // Signer is automatically registered via WalletSaved event
                     await walletStorage.UpsertWallet(wallet, updateIfExists: true, HttpContext.RequestAborted);
-                    
+
                     if (wallet.WalletType == WalletType.SingleKey)
                     {
                        await  contractService.DeriveContract(
-                           wallet.Id, 
-                           NextContractPurpose.SendToSelf, 
-                           ContractActivityState.Active, 
+                           wallet.Id,
+                           NextContractPurpose.SendToSelf,
+                           ContractActivityState.Active,
                            metadata: new Dictionary<string, string> { ["Source"] = "Default" },
                            cancellationToken: HttpContext.RequestAborted);
                     }
-                    
+
                     walletSettings = walletSettings with { WalletId = wallet.Id };
                 }
                 catch (Exception ex)
@@ -192,10 +208,14 @@ public class ArkController(
             // Set Arkade as the default payment method
             store.SetDefaultPaymentId(ArkadePlugin.ArkadePaymentMethodId);
 
-            // Enable Lightning by default if not already configured
+            // Enable Lightning by default if not already configured. Skip watch-only wallets:
+            // Arkade-backed Lightning needs batch participation (signing), and without a paired
+            // remote signer the wallet would accept LN invoices at checkout but fail at
+            // settlement after the customer has already committed to paying. The merchant can
+            // still flip it on manually once a companion signer is paired.
             var lightningPaymentMethodId = GetLightningPaymentMethod();
             var existingLnConfig = store.GetPaymentMethodConfig<LightningPaymentMethodConfig>(lightningPaymentMethodId, paymentMethodHandlerDictionary);
-            if (existingLnConfig == null)
+            if (existingLnConfig == null && !walletSettings.IsWatchOnlyDescriptor)
             {
                 var lnurlPaymentMethodId = PaymentTypes.LNURL.GetPaymentMethodId("BTC");
                 
@@ -2731,8 +2751,29 @@ public class ArkController(
         return lnEnabled;
     }
 
-    private async Task<TemporaryWalletSettings> GetFromInputWallet(string? wallet)
+    private async Task<TemporaryWalletSettings> GetFromInputWallet(string? wallet, WalletSetupMode mode = WalletSetupMode.Auto)
     {
+        // Watch-only path: the input is an account descriptor — a bare
+        // tr(pubkey) for single-key style or a tr([fp/path]xpub/0/*) for
+        // hierarchical-deterministic style. The merchant does NOT own the
+        // signing material (it's on a paired BTCPayApp device or elsewhere),
+        // so IsOwnedByStore is false. If the descriptor matches an existing
+        // wallet id we reuse it; otherwise we hand the descriptor back to
+        // the POST handler with IsWatchOnlyDescriptor=true so it routes to
+        // WalletFactory.CreateWatchOnlyWallet rather than CreateWallet.
+        if (mode == WalletSetupMode.WatchOnly)
+        {
+            if (string.IsNullOrWhiteSpace(wallet))
+                throw new Exception("Account descriptor is required for watch-only import.");
+
+            var trimmed = wallet.Trim();
+            var existingWatchOnly = await walletStorage.GetWalletById(trimmed, HttpContext.RequestAborted);
+            if (existingWatchOnly is not null)
+                return new TemporaryWalletSettings(null, trimmed, null, false, false);
+
+            return new TemporaryWalletSettings(trimmed, null, null, false, false, IsWatchOnlyDescriptor: true);
+        }
+
         if (string.IsNullOrWhiteSpace(wallet))
             return new TemporaryWalletSettings(GenerateWallet(), null, null, true, true);
 
@@ -2792,7 +2833,7 @@ public class ArkController(
         return store.GetPaymentMethodConfig<T>(paymentMethodId, paymentMethodHandlerDictionary);
     }
 
-    private record TemporaryWalletSettings(string? Wallet, string? WalletId, string? Destination, bool IsOwnedByStore, bool IsNewlyGeneratedWallet);
+    private record TemporaryWalletSettings(string? Wallet, string? WalletId, string? Destination, bool IsOwnedByStore, bool IsNewlyGeneratedWallet, bool IsWatchOnlyDescriptor = false);
 
     [HttpGet("~/stores/{storeId}/payout-processors/ark-automated")]
     [Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie)]
