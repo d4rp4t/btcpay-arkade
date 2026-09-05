@@ -29,15 +29,11 @@ using NArk.Core.Models.Options;
 using NArk.Core.Services;
 using NArk.Storage.EfCore.Entities;
 using NArk.Storage.EfCore.Hosting;
-using NArk.Swaps.Policies;
-using NArk.Swaps.Transformers;
 using NArk.ArkadeIntents.Services;
-using NArk.Swaps.Boltz;
-using NArk.Swaps.Boltz.Client;
-using NArk.Swaps.Services;
 using NBitcoin;
 using System.Text.Json;
 using BTCPayServer.Plugins.ArkPayServer.Services.Policies;
+using BTCPayServer.Plugins.ArkPayServer.Services.Legacy;
 using Microsoft.EntityFrameworkCore;
 using NArk.Core.Sweeper;
 using NArk.Core.Transformers;
@@ -84,8 +80,8 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         // The Arkade intent corridors — how this plugin does Lightning.
         RegisterArkadeIntentServices(services, pluginServices);
 
-        // Pre-ArkadeIntents Boltz swaps, kept resolvable so their history stays readable.
-        RegisterLegacySwapServices(services, networkConfig);
+        // The two pieces that keep a pre-migration VHTLC drainable, and nothing else.
+        RegisterLegacyVhtlcDrain(services);
 
     }
 
@@ -393,41 +389,31 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
     }
 
     /// <summary>
-    /// Registers the pre-ArkadeIntents Boltz swap services.
+    /// Registers the two services that keep a pre-migration VHTLC drainable.
     /// </summary>
     /// <remarks>
-    /// Nothing creates a Boltz swap any more — the Lightning client negotiates with an Arkade solver
-    /// instead. This stays for the swaps that already exist: their rows are still rendered on the
-    /// swaps and contracts pages, and <c>VHTLCContractTransformer</c> is what keeps a VHTLC from a
-    /// pre-migration swap spendable, so dropping it would strand any in-flight refund. The same call
-    /// also provides wallet recovery and the swap sweep policy, neither of which is Boltz-specific.
+    /// <para>
+    /// All that is left of the Boltz era. Nothing creates a VHTLC any more — the Lightning corridor
+    /// negotiates a covenant with an Arkade solver instead — and the SDK dropped its swaps package
+    /// entirely, so the swap rows, the Boltz client and the swaps page went with it.
+    /// </para>
+    /// <para>
+    /// These two did not, because they are what a VHTLC still holding sats depends on: the policy
+    /// hands those coins to the sweeper, and the transformer opens whichever leaf is available —
+    /// the claim while we hold the preimage, the refund once the chain's clock passes the locktime.
+    /// Dropping them alongside the rest would have stopped that money moving with no error to show
+    /// for it, which is why they were ported into the plugin rather than deleted.
+    /// </para>
+    /// <para>
+    /// Unconditional, and deliberately not gated on any Boltz configuration. An operator who
+    /// finishes migrating and deletes `boltz` from ark.json is doing the obvious thing; that must
+    /// not be what strands their remaining funds.
+    /// </para>
     /// </remarks>
-    private static void RegisterLegacySwapServices(IServiceCollection services, ArkNetworkConfig networkConfig)
+    private static void RegisterLegacyVhtlcDrain(IServiceCollection services)
     {
-        // Registered on both branches: the legacy page is hidden or shown by whether rows exist,
-        // which is a question about the database, not about whether Boltz is still reachable.
-        services.AddSingleton<ArkadeLegacySwapsService>();
-
-        if (!string.IsNullOrWhiteSpace(networkConfig.BoltzUri))
-        {
-            services.AddHttpClient<BoltzClient>();
-            services.AddHttpClient<CachedBoltzClient>();
-            services.AddArkSwapServices();
-        }
-        else
-        {
-            // Draining old swaps does not need Boltz, and must not be gated on it. An operator who
-            // finishes migrating and deletes `boltz` from ark.json is doing the obvious thing; if
-            // that also unregistered these two, every VHTLC still holding sats would stop being
-            // swept and stop being spendable, silently. Neither touches Boltz: the policy selects
-            // VHTLC coins and the transformer opens whichever leaf is available — the claim when we
-            // hold the preimage, the refund once the chain's clock passes the locktime.
-            //
-            // Registered only on this branch because AddArkSwapServices already includes both, and
-            // a second registration would run the policy twice.
-            services.AddSingleton<ISweepPolicy, SwapSweepPolicy>();
-            services.AddSingleton<IContractTransformer, VHTLCContractTransformer>();
-        }
+        services.AddSingleton<ISweepPolicy, LegacyVhtlcSweepPolicy>();
+        services.AddSingleton<IContractTransformer, LegacyVhtlcContractTransformer>();
     }
 
     #endregion
