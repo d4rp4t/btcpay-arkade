@@ -23,7 +23,10 @@ public static class ArkadeIntentLightningMapper
     /// <returns>The invoice, or <c>null</c> when the swap carries none.</returns>
     public static LightningInvoice? ToInvoice(ArkadeSwapIntent intent, Network network)
     {
-        if (intent.Invoice is not { Length: > 0 } bolt11)
+        // Both moved off the row and into the metadata bag when the SDK generalised the intent
+        // across corridors: a Lightning invoice means nothing to an asset or onchain swap.
+        var lightning = intent.LightningMetadata();
+        if (lightning.Invoice is not { Length: > 0 } bolt11)
         {
             return null;
         }
@@ -54,7 +57,7 @@ public static class ArkadeIntentLightningMapper
             BOLT11 = bolt11,
             PaymentHash = decoded.PaymentHash?.ToString(),
             PaidAt = status == LightningInvoiceStatus.Paid ? intent.CreatedAt.ToUniversalTime() : null,
-            Preimage = intent.Preimage,
+            Preimage = lightning.Preimage,
         };
     }
 
@@ -88,8 +91,8 @@ public static class ArkadeIntentLightningMapper
             Id = intent.Id,
             PaymentHash = intent.PaymentHash,
             Status = status,
-            BOLT11 = intent.Invoice,
-            Preimage = intent.Preimage,
+            BOLT11 = intent.LightningMetadata().Invoice,
+            Preimage = intent.LightningMetadata().Preimage,
             CreatedAt = intent.CreatedAt,
             Amount = amount,
             AmountSent = locked,
