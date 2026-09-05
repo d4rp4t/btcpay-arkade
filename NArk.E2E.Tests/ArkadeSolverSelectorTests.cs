@@ -102,6 +102,108 @@ public class ArkadeSolverSelectorTests
         Assert.Equal(market.MaxQuoteAmount, range.Value.Max);
     }
 
+    // ─── Against a registry written here, not a published one ─────────
+    //
+    // The tests above answer "can this plugin find a solver right now", which is worth asking and
+    // is why they reach the internet. They cannot pin selection itself: what they assert holds
+    // whichever market is picked, and the published cards are somebody else's data — if two solvers
+    // ever publish the same bounds on both sides, an assertion here stops distinguishing anything
+    // without failing. These two supply their own registry so the behaviour is pinned by
+    // construction.
+
+    /// <summary>A registry answering every request with <paramref name="marketsJson"/>.</summary>
+    private static ArkadeSolverSelector SelectorOver(string marketsJson) => new(
+        new ArkadeSolverOptions(),
+        "mutinynet",
+        new SolverDiscoveryService(new HttpClient(new CannedRegistry($$"""
+        {
+          "version": 0,
+          "network": "mutinynet",
+          "generated_at": 1783958400,
+          "commit": "deadbeef",
+          "markets": [ {{marketsJson}} ]
+        }
+        """))));
+
+    /// <summary>One dialable arkade:btc/lightning:btc market.</summary>
+    private static string LightningMarket(
+        string solver, int feeBps, string feeFlat = "0",
+        string minQuote = "1000", string maxQuote = "5000000",
+        string minBase = "1000", string maxBase = "5000000") => $$"""
+        {
+          "pair": "BTC/BTC",
+          "solver": "{{solver}}",
+          "discovery_pubkey": "{{solver}}-pubkey",
+          "base_asset": { "id": "btc", "name": "Bitcoin", "ticker": "BTC", "decimals": 8 },
+          "quote_asset": { "id": "btc", "name": "Bitcoin", "ticker": "BTC", "decimals": 8 },
+          "quote_corridor": "lightning",
+          "fee_bps": {{feeBps}},
+          "fee_flat": "{{feeFlat}}",
+          "min_base_amount": "{{minBase}}",
+          "max_base_amount": "{{maxBase}}",
+          "min_quote_amount": "{{minQuote}}",
+          "max_quote_amount": "{{maxQuote}}",
+          "transports": { "nostr": { "relays": ["wss://relay.example"] } }
+        }
+        """;
+
+    [Fact]
+    public async Task Picks_the_market_that_costs_the_payer_least_at_this_size()
+    {
+        // The flat fee is why the spread alone cannot rank: at 10k sats the 10bps card charges 10
+        // plus its flat 500, and the 60bps card charges 60 — so the wider spread is the cheaper
+        // trade here, and ordering on `fee_bps` would pick the dearer one while looking correct.
+        var selector = SelectorOver(string.Join(",",
+            LightningMarket("flat-heavy", feeBps: 10, feeFlat: "500"),
+            LightningMarket("spread-only", feeBps: 60)));
+
+        var rendezvous = await selector.SelectAsync(10_000);
+
+        Assert.Equal("spread-only-pubkey", rendezvous!.Pubkey);
+    }
+
+    [Fact]
+    public async Task The_cheapest_market_changes_with_the_size()
+    {
+        // The other side of the same arithmetic: at 1,000,000 sats the flat 500 is noise against a
+        // 60bps spread, so the ranking has to invert. A test at one size only would pass against an
+        // implementation that ignored the amount entirely.
+        var selector = SelectorOver(string.Join(",",
+            LightningMarket("flat-heavy", feeBps: 10, feeFlat: "500"),
+            LightningMarket("spread-only", feeBps: 60)));
+
+        var rendezvous = await selector.SelectAsync(1_000_000);
+
+        Assert.Equal("flat-heavy-pubkey", rendezvous!.Pubkey);
+    }
+
+    [Fact]
+    public async Task The_advertised_range_is_the_leg_the_payer_sends_on()
+    {
+        // Quote is the Lightning side — what a payer is asked for. Base bounds the Arkade side, a
+        // different number once the solver's fee is in it. The two are given deliberately
+        // incompatible values so reading the wrong one cannot coincide with reading the right one.
+        var selector = SelectorOver(LightningMarket(
+            "solo", feeBps: 10,
+            minQuote: "2000", maxQuote: "300000",
+            minBase: "7", maxBase: "9"));
+
+        var range = await selector.ServedRangeAsync();
+
+        Assert.Equal((2000L, 300000L), range);
+    }
+
+    /// <summary>Answers every request with one canned body, so no test here touches the network.</summary>
+    private sealed class CannedRegistry(string body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, System.Threading.CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+            });
+    }
+
     [Fact]
     public async Task A_named_solver_skips_discovery_entirely()
     {
