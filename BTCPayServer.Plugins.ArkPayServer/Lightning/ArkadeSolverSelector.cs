@@ -30,8 +30,15 @@ public sealed class ArkadeSolverSelector(
     string? networkName,
     SolverDiscoveryService? discovery = null)
 {
-    /// <summary>The rail this plugin's Lightning corridor settles its quote side on.</summary>
-    private const string LightningCorridor = "lightning";
+    /// <summary>The rail a Lightning corridor settles its quote side on.</summary>
+    public const string LightningCorridor = "lightning";
+
+    /// <summary>The rail an onchain corridor settles its quote side on.</summary>
+    /// <remarks>
+    /// Bitcoin L1. Both legs are still bitcoin — what differs is the rail the quote side settles on,
+    /// which is exactly what the corridor names.
+    /// </remarks>
+    public const string OnchainCorridor = "onchain";
 
     /// <summary>Both legs of the corridor are bitcoin; only the rails differ.</summary>
     private const string BitcoinAssetId = "btc";
@@ -59,15 +66,24 @@ public sealed class ArkadeSolverSelector(
     /// would admit sizes a solver refuses and refuse sizes it would take, both silently. The quote
     /// settles the question exactly, and refuses with the solver's own reason.
     /// </remarks>
+    public Task<SolverRendezvous?> SelectAsync(
+        long amountSats, CancellationToken cancellationToken = default) =>
+        SelectAsync(amountSats, LightningCorridor, cancellationToken);
+
+    /// <summary>Pick the cheapest listed solver on a named corridor.</summary>
+    /// <param name="amountSats">The trade size, used to rank on total fee rather than on spread.</param>
+    /// <param name="quoteCorridor">The rail the quote side settles on.</param>
+    /// <param name="cancellationToken">Cancels the registry fetch.</param>
+    /// <returns>Where to meet the chosen solver, or <c>null</c> when none is listed.</returns>
     public async Task<SolverRendezvous?> SelectAsync(
-        long amountSats, CancellationToken cancellationToken = default)
+        long amountSats, string quoteCorridor, CancellationToken cancellationToken = default)
     {
         if (HasExplicitSolver && Uri.TryCreate(options.RelayUri, UriKind.Absolute, out var configured))
         {
             return new SolverRendezvous(options.SolverPubkey!, configured, null);
         }
 
-        var market = (await LightningMarketsAsync(cancellationToken))
+        var market = (await MarketsAsync(quoteCorridor, cancellationToken))
             .OrderBy(m => m.TotalFeeOn(amountSats))
             .ThenBy(m => m.FeeBps)
             .FirstOrDefault();
@@ -93,8 +109,19 @@ public sealed class ArkadeSolverSelector(
     /// amount clears, which only a quote can answer, but whether there is a counterparty. A named
     /// solver is taken at its word.
     /// </remarks>
-    public async Task<bool> HasLightningSolverAsync(CancellationToken cancellationToken = default) =>
-        HasExplicitSolver || (await LightningMarketsAsync(cancellationToken)).Count > 0;
+    public Task<bool> HasLightningSolverAsync(CancellationToken cancellationToken = default) =>
+        HasSolverForAsync(LightningCorridor, cancellationToken);
+
+    /// <summary>Whether anyone will trade a named corridor at all.</summary>
+    /// <param name="quoteCorridor">The rail the quote side settles on.</param>
+    /// <param name="cancellationToken">Cancels the registry fetch.</param>
+    /// <remarks>
+    /// A named solver is taken at its word for every corridor: it publishes no card, so there is
+    /// nothing to check it against, and refusing it here would make a development stack untestable.
+    /// </remarks>
+    public async Task<bool> HasSolverForAsync(
+        string quoteCorridor, CancellationToken cancellationToken = default) =>
+        HasExplicitSolver || (await MarketsAsync(quoteCorridor, cancellationToken)).Count > 0;
 
     /// <summary>The widest amount range a payer can be asked for on this corridor.</summary>
     /// <param name="cancellationToken">Cancels the registry fetch.</param>
@@ -112,14 +139,22 @@ public sealed class ArkadeSolverSelector(
     /// solver publishes nothing, so it constrains nothing here.
     /// </para>
     /// </remarks>
-    public async Task<(long Min, long Max)?> ServedRangeAsync(CancellationToken cancellationToken = default)
+    public Task<(long Min, long Max)?> ServedRangeAsync(CancellationToken cancellationToken = default) =>
+        ServedRangeAsync(LightningCorridor, cancellationToken);
+
+    /// <summary>The widest amount range a payer can be asked for on a named corridor.</summary>
+    /// <param name="quoteCorridor">The rail the quote side settles on.</param>
+    /// <param name="cancellationToken">Cancels the registry fetch.</param>
+    /// <returns>The range in sats, or <c>null</c> when nothing can be said about it.</returns>
+    public async Task<(long Min, long Max)?> ServedRangeAsync(
+        string quoteCorridor, CancellationToken cancellationToken = default)
     {
         if (HasExplicitSolver)
         {
             return null;
         }
 
-        var bounded = (await LightningMarketsAsync(cancellationToken))
+        var bounded = (await MarketsAsync(quoteCorridor, cancellationToken))
             .Where(m => m.MaxQuoteAmount > 0)
             .ToList();
 
@@ -128,20 +163,31 @@ public sealed class ArkadeSolverSelector(
             : (bounded.Min(m => m.MinQuoteAmount), bounded.Max(m => m.MaxQuoteAmount));
     }
 
-    /// <summary>The corridor's canonical identity: arkade bitcoin against Lightning bitcoin.</summary>
-    private static string WantedPair =>
-        $"{SolverMarket.ArkadeCorridor}:{BitcoinAssetId}/{LightningCorridor}:{BitcoinAssetId}";
+    /// <summary>A corridor's canonical identity: arkade bitcoin against bitcoin on another rail.</summary>
+    /// <param name="quoteCorridor">The rail the quote side settles on.</param>
+    private static string PairFor(string quoteCorridor) =>
+        $"{SolverMarket.ArkadeCorridor}:{BitcoinAssetId}/{quoteCorridor}:{BitcoinAssetId}";
 
-    /// <summary>Every listed market on this corridor that can actually be dialled.</summary>
-    private async Task<IReadOnlyList<IndexedMarket>> LightningMarketsAsync(CancellationToken cancellationToken)
+    /// <summary>Every listed market on a corridor that can actually be dialled.</summary>
+    /// <param name="quoteCorridor">The rail the quote side settles on.</param>
+    /// <param name="cancellationToken">Cancels the registry fetch.</param>
+    /// <remarks>
+    /// The corridor is a parameter rather than a field because nothing else about this selector
+    /// depends on it: the same registry, the same network and the same named-solver escape hatch
+    /// answer for every rail. A second instance per corridor would duplicate the ranking and the
+    /// relay parsing, which are the parts worth having in one place.
+    /// </remarks>
+    private async Task<IReadOnlyList<IndexedMarket>> MarketsAsync(
+        string quoteCorridor, CancellationToken cancellationToken)
     {
         if (discovery is null || networkName is null)
         {
             return [];
         }
 
+        var wanted = PairFor(quoteCorridor);
         return (await DiscoverAsync(cancellationToken))
-            .Where(m => m.PairKey() == WantedPair)
+            .Where(m => m.PairKey() == wanted)
             .Where(m => m.DiscoveryPubkey is { Length: > 0 } && m.Transports?.Nostr?.Relays.Count > 0)
             .ToList();
     }

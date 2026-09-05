@@ -129,14 +129,15 @@ public class ArkadeSolverSelectorTests
     private static string LightningMarket(
         string solver, int feeBps, string feeFlat = "0",
         string minQuote = "1000", string maxQuote = "5000000",
-        string minBase = "1000", string maxBase = "5000000") => $$"""
+        string minBase = "1000", string maxBase = "5000000",
+        string corridor = ArkadeSolverSelector.LightningCorridor) => $$"""
         {
           "pair": "BTC/BTC",
           "solver": "{{solver}}",
           "discovery_pubkey": "{{solver}}-pubkey",
           "base_asset": { "id": "btc", "name": "Bitcoin", "ticker": "BTC", "decimals": 8 },
           "quote_asset": { "id": "btc", "name": "Bitcoin", "ticker": "BTC", "decimals": 8 },
-          "quote_corridor": "lightning",
+          "quote_corridor": "{{corridor}}",
           "fee_bps": {{feeBps}},
           "fee_flat": "{{feeFlat}}",
           "min_base_amount": "{{minBase}}",
@@ -191,6 +192,37 @@ public class ArkadeSolverSelectorTests
         var range = await selector.ServedRangeAsync();
 
         Assert.Equal((2000L, 300000L), range);
+    }
+
+    [Fact]
+    public async Task A_corridor_is_never_answered_with_another_ones_solver()
+    {
+        // Both legs are bitcoin on every one of these corridors, so the only thing separating an
+        // onchain market from a Lightning one is the rail its quote side settles on. Reading that
+        // wrong offers a payer an onchain address for a corridor the solver serves over Lightning.
+        var selector = SelectorOver(string.Join(",",
+            LightningMarket("ln-solver", feeBps: 10),
+            LightningMarket("onchain-solver", feeBps: 90,
+                corridor: ArkadeSolverSelector.OnchainCorridor)));
+
+        var lightning = await selector.SelectAsync(10_000, ArkadeSolverSelector.LightningCorridor);
+        var onchain = await selector.SelectAsync(10_000, ArkadeSolverSelector.OnchainCorridor);
+
+        Assert.Equal("ln-solver-pubkey", lightning!.Pubkey);
+
+        // The dearer card wins here, which is the point: it is the only one on this rail, so
+        // ranking cannot be what picked it.
+        Assert.Equal("onchain-solver-pubkey", onchain!.Pubkey);
+    }
+
+    [Fact]
+    public async Task A_corridor_nobody_serves_has_no_solver()
+    {
+        var selector = SelectorOver(LightningMarket("ln-solver", feeBps: 10));
+
+        Assert.True(await selector.HasSolverForAsync(ArkadeSolverSelector.LightningCorridor));
+        Assert.False(await selector.HasSolverForAsync(ArkadeSolverSelector.OnchainCorridor));
+        Assert.Null(await selector.SelectAsync(10_000, ArkadeSolverSelector.OnchainCorridor));
     }
 
     /// <summary>Answers every request with one canned body, so no test here touches the network.</summary>
