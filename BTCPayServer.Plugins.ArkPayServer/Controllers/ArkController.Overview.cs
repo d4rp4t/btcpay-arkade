@@ -29,8 +29,6 @@ using Microsoft.Extensions.Logging;
 using NArk.Abstractions;
 using NArk.Abstractions.Fees;
 using NArk.Abstractions.Intents;
-using NArk.Swaps.Boltz;
-using NArk.Swaps.Boltz.Client;
 using NArk.Core.Contracts;
 using NArk.Hosting;
 using NArk.Core.Services;
@@ -39,9 +37,7 @@ using NArk.Abstractions.Blockchain;
 using NArk.Abstractions.Contracts;
 using NArk.Abstractions.Extensions;
 using NArk.Abstractions.VTXOs;
-using NArk.Swaps.Abstractions;
 using NArk.Abstractions.Wallets;
-using NArk.Swaps.Models;
 using NArk.Storage.EfCore.Entities;
 using NArk.Core.Wallet;
 using LNURL;
@@ -67,7 +63,7 @@ public partial class ArkController
 
         StartBackgroundRecovery(config.WalletId);
         return RedirectWithSuccess(nameof(StoreOverview),
-            "Wallet rescan started — contracts, funds and swaps will refresh shortly.", new { storeId });
+            "Wallet rescan started — contracts and funds will refresh shortly.", new { storeId });
     }
 
     [HttpGet("stores/{storeId}/overview")]
@@ -164,18 +160,6 @@ public partial class ArkController
             // Silently ignore - intents section will show empty
         }
 
-        // Get recent swaps (latest 5)
-        IReadOnlyCollection<NArk.Swaps.Models.ArkSwap> recentSwaps = [];
-        try
-        {
-            recentSwaps = await swapStorage.GetSwaps(
-                walletIds: [config.WalletId!], take: 5, status: [ArkSwapStatus.Pending , ArkSwapStatus.Settled], cancellationToken: cancellationToken);
-        }
-        catch (Exception)
-        {
-            // Silently ignore - swaps section will show empty
-        }
-
         return View(new StoreOverviewViewModel
         {
             StoreId = store!.Id,
@@ -205,7 +189,6 @@ public partial class ArkController
             VtxoContracts = vtxoContracts,
             TotalVtxoCount = totalVtxoCount,
             RecentIntents = recentIntents,
-            RecentSwaps = recentSwaps
         });
     }
 
@@ -584,40 +567,27 @@ public partial class ArkController
 
 
     /// <summary>
-    /// BTCPay-specific helper to get all wallets with their related contracts and swaps.
+    /// BTCPay-specific helper to get all wallets with their related contracts.
     /// </summary>
     private async Task<List<ArkWalletEntity>> GetWalletsWithDetailsAsync(CancellationToken cancellationToken = default)
     {
         await using var ctx = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         return await ctx.Wallets
             .Include(w => w.Contracts)
-            .Include(w => w.Swaps)
             .ToListAsync(cancellationToken);
     }
 
     /// <summary>
-    /// BTCPay-specific helper to get a wallet with its related contracts and swaps.
+    /// BTCPay-specific helper to get a wallet with its related contracts.
     /// </summary>
     private async Task<ArkWalletEntity?> GetWalletWithDetailsAsync(string walletId, CancellationToken cancellationToken = default)
     {
         await using var ctx = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         return await ctx.Wallets
             .Include(w => w.Contracts)
-            .Include(w => w.Swaps)
             .FirstOrDefaultAsync(w => w.Id == walletId, cancellationToken);
     }
 
-    /// <summary>
-    /// BTCPay-specific helper to check if a wallet has pending swaps.
-    /// </summary>
-    private async Task<bool> HasPendingSwapsAsync(string walletId, CancellationToken cancellationToken = default)
-    {
-        await using var ctx = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        return await ctx.Swaps
-            .AnyAsync(s => s.WalletId == walletId &&
-                          s.Status == ArkSwapStatus.Pending,
-                     cancellationToken);
-    }
 
     /// <summary>
     /// BTCPay-specific helper to check if a wallet has pending intents.

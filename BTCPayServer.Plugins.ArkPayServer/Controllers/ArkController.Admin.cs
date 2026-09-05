@@ -89,11 +89,6 @@ public partial class ArkController
             if (wallet == null)
                 return RedirectWithError(nameof(ListWallets), "Wallet not found.");
 
-            // Check if wallet has any pending swaps
-            var hasPendingSwaps = await HasPendingSwapsAsync(walletId, cancellationToken);
-            if (hasPendingSwaps)
-                return RedirectWithError(nameof(AdminWalletOverview), "Cannot delete wallet: It has pending swaps.", new { walletId });
-
             // Check if wallet has any pending intents
             var hasPendingIntents = await HasPendingIntentsAsync(walletId, cancellationToken);
             if (hasPendingIntents)

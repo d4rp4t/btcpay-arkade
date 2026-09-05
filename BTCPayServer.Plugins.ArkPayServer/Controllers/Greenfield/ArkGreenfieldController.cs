@@ -31,9 +31,6 @@ using NArk.Core.Services;
 using NArk.Core.Transport;
 using NArk.Core.Wallet;
 using NArk.Hosting;
-using NArk.Swaps.Abstractions;
-using NArk.Swaps.Boltz;
-using NArk.Swaps.Models;
 using NBitcoin;
 using NBitcoin.Scripting;
 
@@ -59,7 +56,6 @@ public class ArkGreenfieldController(
     IBitcoinBlockchain bitcoinTimeChainProvider,
     VtxoSynchronizationService vtxoSyncService,
     IContractStorage contractStorage,
-    ISwapStorage swapStorage,
     IVtxoStorage vtxoStorage,
     IWalletStorage walletStorage,
     ArkLightningSpendKeyService spendKeyService,
@@ -980,78 +976,6 @@ public class ArkGreenfieldController(
 
     #endregion
 
-    #region Swaps
-
-    /// <summary>
-    /// List swaps (Lightning/chain) for the store's wallet.
-    /// </summary>
-    [HttpGet("~/api/v1/stores/{storeId}/arkade/swaps")]
-    [Authorize(Policy = Policies.CanViewStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Greenfield)]
-    public async Task<IActionResult> ListSwaps(string storeId,
-        [FromQuery] int skip = 0,
-        [FromQuery] int take = 100,
-        [FromQuery] string? status = null,
-        CancellationToken cancellationToken = default)
-    {
-        var (config, error) = GetStoreConfig();
-        if (error != null) return error;
-
-        take = Math.Min(take, 500);
-
-        ArkSwapStatus[]? statusFilter = null;
-        if (!string.IsNullOrEmpty(status) && Enum.TryParse<ArkSwapStatus>(status, true, out var parsedStatus))
-            statusFilter = [parsedStatus];
-
-        var swaps = await swapStorage.GetSwaps(
-            walletIds: [config!.WalletId!],
-            skip: skip,
-            take: take,
-            status: statusFilter,
-            cancellationToken: cancellationToken);
-
-        var result = swaps.Select(s => new ArkSwapData
-        {
-            SwapId = s.SwapId,
-            WalletId = s.WalletId,
-            Type = s.SwapType.ToString(),
-            Status = s.Status.ToString(),
-            AmountSats = s.ExpectedAmount,
-            CreatedAt = s.CreatedAt,
-            Metadata = FilterPublicSwapMetadata(s.Metadata)
-        }).ToList();
-
-        return Ok(result);
-    }
-
-    // Swap metadata is an internal bookkeeping dictionary that, for chain/reverse
-    // swaps, holds spend-capable secrets — the ephemeral refund private key
-    // (ephemeralKey), the claim preimage, and the full Boltz lockup response
-    // (boltzResponse). Those must never leave the server, so the API exposes only
-    // an explicit allow-list of non-sensitive keys (default-deny: any key not
-    // listed — including any added in future — is dropped). Keys mirror
-    // NArk.Swaps.Models.SwapMetadata; string literals keep this filter independent
-    // of the bundled SDK version.
-    private static readonly HashSet<string> PublicSwapMetadataKeys = new(StringComparer.Ordinal)
-    {
-        "btcAddress",
-        "crossSigned",
-        "refundDestination",
-        "providerId",
-        "route.source.network",
-        "route.source.assetId",
-        "route.destination.network",
-        "route.destination.assetId",
-    };
-
-    private static Dictionary<string, string>? FilterPublicSwapMetadata(
-        IReadOnlyDictionary<string, string>? metadata)
-        => metadata is null
-            ? null
-            : metadata
-                .Where(kv => PublicSwapMetadataKeys.Contains(kv.Key))
-                .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
-
-    #endregion
 
     #region Server Info
 

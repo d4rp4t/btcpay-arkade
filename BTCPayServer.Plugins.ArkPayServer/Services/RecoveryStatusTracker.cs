@@ -16,7 +16,6 @@ public record RecoveryStatus(
     DateTimeOffset StartedAt,
     DateTimeOffset? FinishedAt = null,
     int ContractsRecovered = 0,
-    int SwapsAudited = 0,
     int FundsSynced = 0,
     string? Error = null);
 
@@ -36,7 +35,7 @@ public class RecoveryStatusTracker
     public void SetRunning(string walletId) =>
         _byWallet[walletId] = new RecoveryStatus(RecoveryState.Running, DateTimeOffset.UtcNow);
 
-    public void SetCompleted(string walletId, int contractsRecovered, int swapsAudited, int fundsSynced) =>
+    public void SetCompleted(string walletId, int contractsRecovered, int fundsSynced) =>
         _byWallet[walletId] = (_byWallet.TryGetValue(walletId, out var prev)
             ? prev
             : new RecoveryStatus(RecoveryState.Running, DateTimeOffset.UtcNow)) with
@@ -44,7 +43,6 @@ public class RecoveryStatusTracker
             State = RecoveryState.Completed,
             FinishedAt = DateTimeOffset.UtcNow,
             ContractsRecovered = contractsRecovered,
-            SwapsAudited = swapsAudited,
             FundsSynced = fundsSynced,
         };
 

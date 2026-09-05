@@ -22,7 +22,6 @@
                     <th text-translate="true">Wallet ID</th>
                     <th text-translate="true">Type</th>
                     <th text-translate="true">Contracts</th>
-                    <th text-translate="true">Swaps</th>
                     <th text-translate="true">Destination</th>
                     <th></th>
                 </tr>
@@ -55,15 +54,6 @@
                             }
                         </td>
                         <td>
-                            @if (wallet.Swaps?.Any() == true)
-                            {
-                                <span class="badge text-bg-warning">@wallet.Swaps.Count</span>
-                            }
-                            else
-                            {
-                                <span class="badge text-bg-light text-muted fw-normal">0</span>
-                            }
-                        </td>
                         <td>
                             @if (wallet.WalletDestination != null)
                             {
@@ -113,7 +103,6 @@
                                         <p class="mb-2"><strong>This will delete:</strong></p>
                                         <ul>
                                             <li>@(wallet.Contracts?.Count ?? 0) contract(s)</li>
-                                            <li>@(wallet.Swaps?.Count ?? 0) swap(s)</li>
                                             <li>All associated VTXOs and intents</li>
                                             <li>All wallet configuration data</li>
                                         </ul>

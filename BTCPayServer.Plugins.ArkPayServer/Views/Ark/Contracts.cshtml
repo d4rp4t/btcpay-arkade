@@ -10,7 +10,6 @@
 @using NArk.Abstractions.Contracts
 @using NArk.Core.Transport
 @using NArk.Hosting
-@using NArk.Swaps.Models
 @using static BTCPayServer.Plugins.ArkPayServer.Helpers.ArkViewHelpers
 @model BTCPayServer.Plugins.ArkPayServer.Models.StoreContractsViewModel
 @inject IScopeProvider ScopeProvider
@@ -205,8 +204,6 @@
                         var hasUnspentVtxos = hasVtxos && vtxos.Any(v => !v.IsSpent());
                         var hasRecoverableVtxos = hasVtxos && vtxos.Any(v => v.CanSpendOffchain(chainTime) || !v.IsSpent());
 
-                        ArkSwap[]? swaps = [];
-                        var hasSwaps = Model.ContractSwaps.TryGetValue(contract.Script, out swaps) && swaps.Any();
 
                         var sublistColspan = Model.Debug ? 11 : 9;
 
@@ -288,10 +285,6 @@
                                 }
                             </td>
                             <td class="align-middle">
-                                @if (hasSwaps)
-                                {
-                                    <span class="badge text-bg-warning">@swaps.Length</span>
-                                }
                                 else
                                 {
                                     <span class="badge text-bg-light text-muted fw-normal">0</span>
@@ -326,9 +319,9 @@
                                     </button>
                                     @* Always render the expand-details button so the refresh / delete icons
                                        keep the same column positions across rows. When the contract has no
-                                       VTXOs or swaps to reveal, the slot is held invisible (no click, no
+                                       VTXOs to reveal, the slot is held invisible (no click, no
                                        collapse target). *@
-                                    @if (hasVtxos || hasSwaps)
+                                    @if (hasVtxos)
                                     {
                                         <button class="accordion-button collapsed only-for-js ms-0 d-inline-block" type="button" data-bs-toggle="collapse" data-bs-target="#@detailsId" aria-expanded="false" aria-controls="@detailsId">
                                             <vc:icon symbol="caret-down" />
@@ -350,7 +343,7 @@
                             </td>
                         </tr>
 
-                        @if (hasVtxos || hasSwaps)
+                        @if (hasVtxos)
                         {
                             <tr id="@detailsId" class="contract-details-row collapse">
                                 <td></td>
@@ -365,15 +358,6 @@
                                                 { "TimeColumnLabel", "Seen" }
                                             }' />
                                         </div>
-                                    }
-
-                                    @if (hasSwaps)
-                                    {
-                                        <h6 class="mb-3">Swaps</h6>
-                                        <partial name="_SwapTable" model="swaps" view-data='new ViewDataDictionary(ViewData) {
-                                            { "UseTimeAgo", true },
-                                            { "TimeColumnLabel", "Created" }
-                                        }' />
                                     }
                                 </td>
                             </tr>
@@ -404,12 +388,6 @@
                                                 <label class="text-muted small">Contract Type</label>
                                                 <div>@contract.Type</div>
                                             </div>
-                                            @if (hasSwaps)
-                                            {
-                                                <div class="alert alert-info">
-                                                    <strong>Note:</strong> This contract has swap history. Deleting will remove all swap records.
-                                                </div>
-                                            }
                                             <p class="text-muted mb-0">
                                                 Deleting this contract will remove it from your wallet. This action cannot be undone.
                                             </p>
@@ -452,7 +430,7 @@ else
                 <form asp-action="ImportContract" method="post" asp-route-storeId="@Model.StoreId">
                     <div class="modal-body">
                         <div class="alert alert-info">
-                            <strong>Info:</strong> Import an existing Arkade contract to track its VTXOs and swaps.
+                            <strong>Info:</strong> Import an existing Arkade contract to track its VTXOs.
                         </div>
                         <div class="form-group mb-3">
                             <label class="form-label">Contract String</label>

@@ -3,7 +3,6 @@ using BTCPayServer.Plugins.ArkPayServer.Services;
 using NArk.Abstractions.Contracts;
 using NArk.Abstractions.VTXOs;
 using NArk.Abstractions.Wallets;
-using NArk.Swaps.Models;
 using NBitcoin;
 namespace BTCPayServer.Plugins.ArkPayServer.Models;
 
@@ -72,8 +71,4 @@ public class StoreOverviewViewModel
     // Recent intents
     public IReadOnlyCollection<NArk.Abstractions.Intents.ArkIntent> RecentIntents { get; set; } = [];
     public int TotalIntentCount { get; set; }
-
-    // Recent swaps
-    public IReadOnlyCollection<ArkSwap> RecentSwaps { get; set; } = [];
-    public int TotalSwapCount { get; set; }
 }

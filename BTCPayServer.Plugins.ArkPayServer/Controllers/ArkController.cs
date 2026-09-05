@@ -32,10 +32,8 @@ using NArk.Abstractions.Blockchain;
 using NArk.Abstractions.Contracts;
 using NArk.Abstractions.Extensions;
 using NArk.Abstractions.VTXOs;
-using NArk.Swaps.Abstractions;
 using NArk.Abstractions.Wallets;
 using NArk.ArkadeIntents;
-using NArk.Swaps.Models;
 using NArk.Core.Wallet;
 using NBitcoin;
 
@@ -69,8 +67,6 @@ public partial class ArkController(
     IBitcoinBlockchain bitcoinTimeChainProvider,
     VtxoSynchronizationService vtxoSyncService,
     IContractStorage contractStorage,
-    ISwapStorage swapStorage,
-    ArkadeLegacySwapsService legacySwaps,
     IVtxoStorage vtxoStorage,
     IWalletStorage walletStorage,
     IDbContextFactory<ArkPluginDbContext> dbContextFactory,
@@ -142,13 +138,14 @@ public partial class ArkController(
     /// Starts unified wallet recovery for <paramref name="walletId"/> on a background
     /// thread (a gap-limit scan polls arkd per index), tracking status for the overview.
     /// Discovers contracts (incl. legacy deprecated-signer scripts) + the derivation
-    /// index, restores swaps, finalizes pending txs and resyncs offchain funds, then
-    /// syncs boarding (on-chain) UTXOs. <c>IWalletRecoveryService</c> is only registered
-    /// when swaps (Boltz) are configured; without it this degrades to a boarding-only sync.
+    /// index, finalizes pending txs and resyncs offchain funds, then syncs boarding
+    /// (on-chain) UTXOs. <c>IWalletRecoveryService</c> now comes from NArk.Core and is always
+    /// registered — it used to arrive with the swaps package, so recovery silently degraded to a
+    /// boarding-only sync for any store that had not configured Boltz.
     /// </summary>
     private void StartBackgroundRecovery(string walletId)
     {
-        var recoveryService = serviceProvider.GetService<NArk.Swaps.Recovery.IWalletRecoveryService>();
+        var recoveryService = serviceProvider.GetService<NArk.Core.Recovery.IWalletRecoveryService>();
         _ = Task.Run(async () =>
         {
             try
@@ -156,13 +153,11 @@ public partial class ArkController(
                 recoveryStatusTracker.SetRunning(walletId);
 
                 var contractsRecovered = 0;
-                var swapsAudited = 0;
                 var fundsSynced = 0;
                 if (recoveryService is not null)
                 {
                     var report = await recoveryService.RecoverAsync(walletId, cancellationToken: CancellationToken.None);
                     contractsRecovered = report.ContractsRecovered;
-                    swapsAudited = report.SwapAudit.Count;
                     fundsSynced = report.FundsScriptsSynced;
                 }
 
@@ -175,7 +170,7 @@ public partial class ArkController(
 
                 recoveryStatusTracker.SetCompleted(walletId,
                     recoveryService is not null ? contractsRecovered : boardingContracts.Count,
-                    swapsAudited, fundsSynced);
+                    fundsSynced);
             }
             catch (Exception ex)
             {

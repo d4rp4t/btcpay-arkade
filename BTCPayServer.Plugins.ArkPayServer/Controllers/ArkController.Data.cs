@@ -9,7 +9,6 @@ using NArk.Abstractions.Contracts;
 using NArk.Abstractions.VTXOs;
 using NArk.ArkadeIntents;
 using NArk.ArkadeIntents.Models;
-using NArk.Swaps.Models;
 using NBitcoin;
 
 namespace BTCPayServer.Plugins.ArkPayServer.Controllers;
@@ -60,20 +59,6 @@ public partial class ArkController
                 .ToDictionary(g => g.Key, g => g.ToArray());
         }
 
-        // Always load swaps
-        var contractSwaps = new Dictionary<string, NArk.Swaps.Models.ArkSwap[]>();
-        if (contracts.Any())
-        {
-            var contractScripts = contracts.Select(c => c.Script).ToArray();
-            var swaps = await swapStorage.GetSwaps(
-                walletIds: [config.WalletId!],
-                contractScripts: contractScripts,
-                cancellationToken: HttpContext.RequestAborted);
-            contractSwaps = swaps
-                .GroupBy(s => s.ContractScript)
-                .ToDictionary(g => g.Key, g => g.ToArray());
-        }
-
         var model = new StoreContractsViewModel
         {
             StoreId = storeId,
@@ -83,7 +68,6 @@ public partial class ArkController
             SearchText = searchText,
             Search = new SearchString(searchTerm),
             ContractVtxos = contractVtxos,
-            ContractSwaps = contractSwaps,
             CanManageContracts = config.GeneratedByStore,
             Debug = debug,
             CachedContractScripts = (await contractStorage.GetContracts(walletIds: [config.WalletId], isActive: true, cancellationToken: HttpContext.RequestAborted))
@@ -155,73 +139,6 @@ public partial class ArkController
         });
     }
 
-    public async Task<IActionResult> Swaps(
-        string storeId,
-        string? searchTerm = null,
-        string? searchText = null,
-        int skip = 0,
-        int count = 50,
-        bool debug = false)
-    {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
-        if (errorResult != null) return errorResult;
-
-        if (!config!.GeneratedByStore)
-            return View(new StoreSwapsViewModel { StoreId = storeId });
-
-        // Hidden from the navigation once a store has no pre-migration swaps, so a request that
-        // still arrives is a stale bookmark rather than a choice. Send it to the page that replaced
-        // this one instead of rendering a table that can never fill.
-        if (!await legacySwaps.HasLegacySwapsAsync(config.WalletId, HttpContext.RequestAborted))
-            return RedirectToAction(nameof(LightningSwaps), new { storeId });
-
-        // Get status filter using helper
-        var statusFilter = ParseEnumFilter<ArkSwapStatus>(searchTerm, "status", s => s switch
-        {
-            "pending" => ArkSwapStatus.Pending,
-            "settled" => ArkSwapStatus.Settled,
-            "failed" => ArkSwapStatus.Failed,
-            _ => null
-        });
-
-        // Get type filter using helper
-        var typeFilter = ParseEnumFilter<ArkSwapType>(searchTerm, "type", t => t switch
-        {
-            "reverse" => ArkSwapType.ReverseSubmarine,
-            "submarine" => ArkSwapType.Submarine,
-            _ => null
-        });
-
-        var swaps = await swapStorage.GetSwaps(
-            walletIds: [config.WalletId!],
-            status: statusFilter != null ? [statusFilter.Value] : null,
-            swapTypes: typeFilter != null ? [typeFilter.Value] : null,
-            searchText: searchText,
-            skip: skip,
-            take: count,
-            cancellationToken: HttpContext.RequestAborted);
-
-        // Get contracts for the swaps to display contract details
-        var swapContractScripts = swaps.Select(s => s.ContractScript).Distinct().ToArray();
-        var swapContracts = await contractStorage.GetContracts(
-            walletIds: [config.WalletId!],
-            scripts: swapContractScripts,
-            cancellationToken: HttpContext.RequestAborted);
-
-        var model = new StoreSwapsViewModel
-        {
-            StoreId = storeId,
-            Swaps = swaps,
-            SwapContracts = swapContracts.ToDictionary(c => c.Script),
-            Skip = skip,
-            Count = count,
-            SearchText = searchText,
-            Search = new SearchString(searchTerm),
-            Debug = debug
-        };
-
-        return View(model);
-    }
 
     [HttpGet("stores/{storeId}/vtxos")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
@@ -512,12 +429,7 @@ public partial class ArkController
             if (!contracts.Any())
                 return RedirectWithError(nameof(Contracts), "Contract not found.", new { storeId });
 
-            // Check if contract has any pending swaps
-            var swaps = await swapStorage.GetSwaps(walletIds: [config.WalletId!], contractScripts: [script], status: [ArkSwapStatus.Pending], cancellationToken: cancellationToken);
-            if (swaps.Any())
-                return RedirectWithError(nameof(Contracts), "Cannot delete contract: It has pending swaps.", new { storeId });
-
-            // Delete the contract (cascade will delete related swaps)
+            // Delete the contract
             await contractStorage.DeleteContract(config.WalletId, script, cancellationToken);
             return RedirectWithSuccess(nameof(Contracts), "Contract deleted successfully.", new { storeId });
         }

@@ -8,7 +8,6 @@
 @using BTCPayServer.Views.Stores
 @model BTCPayServer.Components.MainNav.MainNavViewModel
 @inject PaymentMethodHandlerDictionary HandlerDictionary
-@inject BTCPayServer.Plugins.ArkPayServer.Services.ArkadeLegacySwapsService LegacySwaps
 @{
     var config =
         Model.Store
@@ -18,7 +17,6 @@
             true
         );
     var enabled = !string.IsNullOrEmpty(config?.WalletId);
-    var hasLegacySwaps = enabled && await LegacySwaps.HasLegacySwapsAsync(config!.WalletId);
 }
 
 <li class="nav-item">
@@ -75,17 +73,6 @@
                    asp-route-storeId="@Model.Store.Id"
                    ext-translate="true">Lightning swaps</a>
             </li>
-            @if (hasLegacySwaps)
-            {
-                <li class="nav-item nav-item-sub">
-                    <a id="StoreNav-Swaps"
-                       class="nav-link @ViewData.ActivePageClass("Swaps", "Ark")"
-                       asp-controller="Ark"
-                       asp-action="Swaps"
-                       asp-route-storeId="@Model.Store.Id"
-                       ext-translate="true">Swaps (legacy)</a>
-                </li>
-            }
             <li class="nav-item nav-item-sub">
                 <a id="StoreNav-Vtxos"
                    class="nav-link @ViewData.ActivePageClass("VTXOs", "Ark")"
