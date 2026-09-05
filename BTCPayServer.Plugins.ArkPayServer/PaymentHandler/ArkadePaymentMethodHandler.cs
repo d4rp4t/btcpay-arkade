@@ -1,4 +1,8 @@
 using BTCPayServer.Data;
+using NArk.ArkadeIntents.Services;
+using NArk.ArkadeIntents.Onchain;
+using BTCPayServer.Plugins.ArkPayServer.Lightning;
+using Microsoft.Extensions.Logging;
 using BTCPayServer.Payments;
 using BTCPayServer.Services;
 using NArk.Core;
@@ -17,7 +21,10 @@ public class ArkadePaymentMethodHandler(
     IContractService contractService,
     IClientTransport clientTransport,
     BoardingUtxoSyncService boardingUtxoSyncService,
-    IWalletStorage walletStorage
+    IWalletStorage walletStorage,
+    ILogger<ArkadePaymentMethodHandler> logger,
+    ArkadeIntentsService? intents = null,
+    ArkadeSolverService? solver = null
 ) : IPaymentMethodHandler
 {
     public PaymentMethodId PaymentMethodId => ArkadePlugin.ArkadePaymentMethodId;
@@ -68,7 +75,13 @@ public class ArkadePaymentMethodHandler(
         var hasOnchain = context.InvoiceEntity.GetPaymentPrompt(PaymentTypes.CHAIN.GetPaymentMethodId("BTC")) is not null;
         var wallet = await walletStorage.GetWalletById(arkadePaymentMethodConfig.WalletId);
         var amountSats = Money.Coins(context.Prompt.Calculate().Due).Satoshi;
-        if (arkadePaymentMethodConfig.BoardingEnabled &&
+        // Derived whenever EITHER onchain path is on, because the swap needs it too — not as a
+        // method it offers, but as where its L1 refund goes. Sending that refund to an address
+        // BTCPay never associated with this invoice would leave the merchant paid and the invoice
+        // open, so the sink has to be an address registered here, at prompt time.
+        var wantsBoarding = arkadePaymentMethodConfig.BoardingEnabled
+            || arkadePaymentMethodConfig.OnchainSwapEnabled;
+        if (wantsBoarding &&
             !hasOnchain && wallet?.WalletType == WalletType.HD &&
             amountSats >= arkadePaymentMethodConfig.MinBoardingAmountSats)
         {
@@ -93,19 +106,95 @@ public class ArkadePaymentMethodHandler(
                         ? Network.TestNet
                         : Network.RegTest;
                 var boardingAddress = boardingContract.GetOnchainAddress(network);
-                details = details with
-                {
-                    BoardingAddress = boardingAddress.ToString(),
-                    BoardingContractString = boardingContract.ToString(),
-                };
+
+                // Tracked whichever path is taken: on the swap path this is where the refund lands,
+                // and BTCPay credits a payment to an invoice by the destinations registered here.
                 context.TrackedDestinations.Add(boardingAddress.ToString());
                 context.TrackedDestinations.Add(boardingContract.GetScriptPubKey().ToHex());
 
                 // Trigger sync so NBXplorer starts tracking this boarding address immediately
                 _ = Task.Run(() => boardingUtxoSyncService.SyncAsync(CancellationToken.None));
+
+                var swap = arkadePaymentMethodConfig.OnchainSwapEnabled
+                    ? await NegotiateOnchainSwapAsync(
+                        arkadePaymentMethodConfig.WalletId, amountSats, boardingAddress)
+                    : null;
+
+                if (swap is not null)
+                {
+                    // The swap replaces boarding rather than joining it. Both are onchain addresses
+                    // and they want different amounts — offering the pair invites a payer to split a
+                    // payment between them, which funds neither.
+                    details = details with
+                    {
+                        SwapHtlcAddress = swap.HtlcAddress,
+                        SwapFundAmountSats = swap.FundAmountSats,
+                        SwapId = swap.RfqId,
+                    };
+                    context.TrackedDestinations.Add(swap.HtlcAddress);
+                }
+                else if (arkadePaymentMethodConfig.BoardingEnabled)
+                {
+                    details = details with
+                    {
+                        BoardingAddress = boardingAddress.ToString(),
+                        BoardingContractString = boardingContract.ToString(),
+                    };
+                }
         }
 
         context.Prompt.Details = JObject.FromObject(details, Serializer);
+    }
+
+    /// <summary>
+    /// Negotiate the fast onchain path, or return <c>null</c> to fall back to boarding.
+    /// </summary>
+    /// <param name="walletId">The store's wallet.</param>
+    /// <param name="amountSats">What the invoice is due.</param>
+    /// <param name="refundDestination">
+    /// Where the L1 refund goes if the swap never settles — this invoice's own boarding address, so
+    /// a failed swap degrades into the slow path rather than into a reconciliation problem.
+    /// </param>
+    /// <returns>The negotiated on-board, or <c>null</c> when this path is not available.</returns>
+    /// <remarks>
+    /// <para>
+    /// Every failure here returns <c>null</c> rather than throwing. A solver that is unlisted, slow,
+    /// unreachable or simply unwilling to quote is a reason to offer the slower path, not a reason
+    /// the merchant cannot be paid — and this runs while a customer is waiting for a checkout page.
+    /// </para>
+    /// <para>
+    /// The corridor is asked for by name: a solver listed for Lightning is not thereby listed for
+    /// onchain.
+    /// </para>
+    /// </remarks>
+    private async Task<PendingOnchainReceive?> NegotiateOnchainSwapAsync(
+        string walletId, long amountSats, BitcoinAddress refundDestination)
+    {
+        if (intents is null || solver is null) return null;
+
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            if (!await solver.HasSolverForAsync(
+                    ArkadeSolverSelector.OnchainCorridor, timeout.Token))
+            {
+                return null;
+            }
+
+            var covclaimd = await solver.ResolveClaimRecipientAsync(timeout.Token);
+            return await solver.WithTransportAsync(
+                amountSats, ArkadeSolverSelector.OnchainCorridor,
+                transport => intents.ReceiveFromOnchainAsync(
+                    walletId, amountSats, transport, covclaimd, refundDestination,
+                    cancellationToken: timeout.Token),
+                timeout.Token);
+        }
+        catch (Exception e)
+        {
+            logger.LogInformation(
+                e, "No onchain swap for this invoice; offering the boarding path instead");
+            return null;
+        }
     }
 
     public Task BeforeFetchingRates(PaymentMethodContext context)

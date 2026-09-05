@@ -46,6 +46,13 @@ public class ArkadeSolverService(
     public Task<bool> HasSolverAsync(CancellationToken cancellationToken = default) =>
         selector.HasLightningSolverAsync(cancellationToken);
 
+    /// <summary>Whether anyone is listed to trade a named corridor.</summary>
+    /// <param name="quoteCorridor">The rail the quote side settles on.</param>
+    /// <param name="cancellationToken">Cancels the registry fetch.</param>
+    public Task<bool> HasSolverForAsync(
+        string quoteCorridor, CancellationToken cancellationToken = default) =>
+        selector.HasSolverForAsync(quoteCorridor, cancellationToken);
+
     /// <summary>The amount range a payer can be asked for, for advertising one up front.</summary>
     /// <param name="cancellationToken">Cancels the registry fetch.</param>
     public Task<(long Min, long Max)?> ServedRangeAsync(CancellationToken cancellationToken = default) =>
@@ -80,17 +87,39 @@ public class ArkadeSolverService(
     /// invoice.
     /// </para>
     /// </remarks>
+    public Task<T> WithTransportAsync<T>(
+        long amountSats,
+        Func<IRfqTransport, Task<T>> negotiate,
+        CancellationToken cancellationToken = default) =>
+        WithTransportAsync(amountSats, ArkadeSolverSelector.LightningCorridor, negotiate, cancellationToken);
+
+    /// <summary>
+    /// Run one negotiation on a named corridor against the solver chosen for this trade.
+    /// </summary>
+    /// <typeparam name="T">What the negotiation produces.</typeparam>
+    /// <param name="amountSats">The size being traded, which ranks the candidates.</param>
+    /// <param name="quoteCorridor">The rail the quote side settles on.</param>
+    /// <param name="negotiate">The negotiation to run.</param>
+    /// <param name="cancellationToken">Cancels the selection.</param>
+    /// <returns>Whatever <paramref name="negotiate"/> returned.</returns>
+    /// <exception cref="InvalidOperationException">Nobody is listed to serve this corridor.</exception>
+    /// <remarks>
+    /// A corridor is asked for by name because a solver listed for one is not thereby listed for
+    /// another: both legs of every corridor here are bitcoin, and the rail its quote side settles
+    /// on is the only thing separating them. Picking a Lightning solver for an onchain trade would
+    /// hand a payer an address the counterparty never agreed to watch.
+    /// </remarks>
     public async Task<T> WithTransportAsync<T>(
         long amountSats,
+        string quoteCorridor,
         Func<IRfqTransport, Task<T>> negotiate,
         CancellationToken cancellationToken = default)
     {
-        var rendezvous = await selector.SelectAsync(amountSats, cancellationToken)
+        var rendezvous = await selector.SelectAsync(amountSats, quoteCorridor, cancellationToken)
             ?? throw new InvalidOperationException(
-                $"No Arkade swap solver serves a Lightning swap of {amountSats} sats. Either no " +
-                "solver is listed for this network, or none publishes bounds that include this " +
-                "amount. Set solver-relay and solver-pubkey in the Arkade network configuration to " +
-                "name one directly.");
+                $"No Arkade swap solver is listed for the {quoteCorridor} corridor on this network, " +
+                "and none is named in the Arkade network configuration. Set solver-relay and " +
+                "solver-pubkey to name one directly.");
 
         var transport = Open(rendezvous);
         try
