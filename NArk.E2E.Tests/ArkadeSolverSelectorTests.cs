@@ -72,12 +72,16 @@ public class ArkadeSolverSelectorTests
     }
 
     [Fact]
-    public async Task Refuses_a_size_no_solver_advertises()
+    public async Task Selects_regardless_of_size_and_leaves_the_bounds_to_the_quote()
     {
+        // A card states bounds per side and which side applies depends on the direction of the
+        // trade, so selection ranks on the amount but does not exclude on it. A whole bitcoin is far
+        // outside every published Lightning corridor and still picks a counterparty; the quote is
+        // what refuses it, with the solver's own reason.
         var selector = Selector(Bitcoin.Instance.Mutinynet.ChainName);
 
-        Assert.Null(await selector.SelectAsync(100_000_000));
-        Assert.False(await selector.ServesAsync(100_000_000));
+        Assert.NotNull(await selector.SelectAsync(100_000_000));
+        Assert.True(await selector.HasLightningSolverAsync());
     }
 
     [Fact]
@@ -90,6 +94,12 @@ public class ArkadeSolverSelectorTests
         Assert.NotNull(range);
         Assert.True(range!.Value.Min > 0);
         Assert.True(range.Value.Max > range.Value.Min);
+
+        // The quote side, which is the Lightning leg — what a payer is actually asked for. The base
+        // side bounds the Arkade leg, a different number once the solver's fee is in it.
+        var market = (await selector.SelectAsync(10_000))!.Market!;
+        Assert.Equal(market.MinQuoteAmount, range.Value.Min);
+        Assert.Equal(market.MaxQuoteAmount, range.Value.Max);
     }
 
     [Fact]
@@ -110,6 +120,7 @@ public class ArkadeSolverSelectorTests
         Assert.NotNull(rendezvous);
         Assert.Equal("ws://localhost:7777/", rendezvous!.Relay.ToString());
         Assert.Null(rendezvous.Market);
-        Assert.True(await selector.ServesAsync(100_000_000));
+        Assert.True(await selector.HasLightningSolverAsync());
+        Assert.Null(await selector.ServedRangeAsync());
     }
 }

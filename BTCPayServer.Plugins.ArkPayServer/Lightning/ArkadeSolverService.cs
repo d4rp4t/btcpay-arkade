@@ -35,17 +35,18 @@ public class ArkadeSolverService(
     /// </remarks>
     public bool IsConfigured => selector.CanReachASolver;
 
-    /// <summary>Whether a solver will trade a Lightning swap of this size.</summary>
-    /// <param name="amountSats">The size being traded.</param>
+    /// <summary>Whether anyone is listed to trade this corridor.</summary>
     /// <param name="cancellationToken">Cancels the registry fetch.</param>
     /// <remarks>
     /// Answered from published cards, so it costs a cached registry read rather than a negotiation.
-    /// A named solver publishes no card and is taken at its word.
+    /// Deliberately not "will a solver take this amount": which side of a card's bounds applies
+    /// depends on the direction of the trade, so a size check here would be a guess dressed as a
+    /// rule. The quote answers it exactly, with the solver's own reason attached.
     /// </remarks>
-    public Task<bool> ServesAsync(long amountSats, CancellationToken cancellationToken = default) =>
-        selector.ServesAsync(amountSats, cancellationToken);
+    public Task<bool> HasSolverAsync(CancellationToken cancellationToken = default) =>
+        selector.HasLightningSolverAsync(cancellationToken);
 
-    /// <summary>The size range any listed solver serves, for advertising one up front.</summary>
+    /// <summary>The amount range a payer can be asked for, for advertising one up front.</summary>
     /// <param name="cancellationToken">Cancels the registry fetch.</param>
     public Task<(long Min, long Max)?> ServedRangeAsync(CancellationToken cancellationToken = default) =>
         selector.ServedRangeAsync(cancellationToken);

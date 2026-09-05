@@ -74,33 +74,29 @@ public class ArkadeLightningAvailabilityService : IDisposable
         return usesArkade;
     }
 
-    /// <summary>Whether Lightning should be offered for an invoice on this store.</summary>
+    /// <summary>Whether Lightning should be offered on this store.</summary>
     /// <param name="storeId">The store the invoice belongs to.</param>
-    /// <param name="amountSats">The invoice amount, or zero for a top-up.</param>
     /// <param name="cancellationToken">Observed before the store lookup.</param>
     /// <remarks>
-    /// The amount decides nothing beyond the top-up case — see the note on the class. It stays in
-    /// the signature because a top-up invoice has no amount to quote for, so there is nothing a
-    /// solver could refuse and no reason to withhold the method.
+    /// Takes no amount, because none would change the answer — see the note on the class. The
+    /// top-up case needs no special handling either: an invoice with no amount and an invoice with
+    /// one are offered the method on the same grounds, which is whether anything can settle it.
     /// </remarks>
     public async Task<bool> ShouldOfferLightningAsync(
-        string storeId, long amountSats, CancellationToken cancellationToken = default)
+        string storeId, CancellationToken cancellationToken = default)
     {
-        if (amountSats == 0)
-        {
-            return true;
-        }
-
         // Somebody else's Lightning, so somebody else's decision.
         if (!await IsStoreUsingArkadeLightningAsync(storeId, cancellationToken))
         {
             return true;
         }
 
-        // Not merely "is a solver reachable" but "will one take a trade this size": a listed solver
-        // publishes its bounds, so an amount outside every one of them can be refused here rather
-        // than at the point of quoting, when the customer is already looking at a checkout page.
-        return await _solver.ServesAsync(amountSats, cancellationToken);
+        // Whether anyone is listed to settle this corridor. Not whether this particular amount
+        // clears — a card states bounds per side and which side applies depends on the direction of
+        // the trade, so checking one here would refuse sizes a solver would take and admit sizes it
+        // would not. Offering a method nobody serves is the failure worth preventing; an amount the
+        // chosen solver declines is refused at quoting time, with its reason.
+        return await _solver.HasSolverAsync(cancellationToken);
     }
 
     /// <summary>Evicts a store's cached connection-string verdict.</summary>

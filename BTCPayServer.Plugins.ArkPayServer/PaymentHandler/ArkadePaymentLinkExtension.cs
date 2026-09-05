@@ -87,11 +87,7 @@ public class ArkadePaymentLinkExtension : IPaymentLinkExtension
 
     private async Task<bool> ShouldIncludeLightning(PaymentPrompt prompt)
     {
-        var amountSats = (long)Money.Coins(prompt.Calculate().Due).Satoshi;
-
         return await _availability.ShouldOfferLightningAsync(
-            prompt.ParentEntity.StoreId,
-            amountSats,
-            CancellationToken.None);
+            prompt.ParentEntity.StoreId, CancellationToken.None);
     }
 }

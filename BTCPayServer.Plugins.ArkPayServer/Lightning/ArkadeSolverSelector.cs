@@ -48,10 +48,17 @@ public sealed class ArkadeSolverSelector(
     /// </remarks>
     public bool CanReachASolver => HasExplicitSolver || (discovery is not null && networkName is not null);
 
-    /// <summary>Pick the cheapest listed solver that serves a Lightning trade of this size.</summary>
-    /// <param name="amountSats">The size being traded, on the Arkade side.</param>
+    /// <summary>Pick the cheapest listed solver on the Lightning corridor.</summary>
+    /// <param name="amountSats">The trade size, used to rank on total fee rather than on spread.</param>
     /// <param name="cancellationToken">Cancels the registry fetch.</param>
-    /// <returns>Where to meet the chosen solver, or <c>null</c> when none serves this trade.</returns>
+    /// <returns>Where to meet the chosen solver, or <c>null</c> when none is listed.</returns>
+    /// <remarks>
+    /// The amount ranks but does not exclude. A card states its bounds per side, and which side
+    /// applies depends on the direction of the trade — the leg the solver pays out — while this
+    /// method is called from both. Comparing a Lightning-side amount against the Arkade-side bounds
+    /// would admit sizes a solver refuses and refuse sizes it would take, both silently. The quote
+    /// settles the question exactly, and refuses with the solver's own reason.
+    /// </remarks>
     public async Task<SolverRendezvous?> SelectAsync(
         long amountSats, CancellationToken cancellationToken = default)
     {
@@ -60,13 +67,17 @@ public sealed class ArkadeSolverSelector(
             return new SolverRendezvous(options.SolverPubkey!, configured, null);
         }
 
-        var market = (await ServingMarketsAsync(amountSats, cancellationToken)).FirstOrDefault();
+        var market = (await LightningMarketsAsync(cancellationToken))
+            .OrderBy(m => m.TotalFeeOn(amountSats))
+            .ThenBy(m => m.FeeBps)
+            .FirstOrDefault();
+
         if (market?.DiscoveryPubkey is not { Length: > 0 } pubkey)
         {
             return null;
         }
 
-        // A market that survived selection is reachable by construction, but the relay list is a
+        // A market that got this far is reachable by construction, but the relay list is a
         // stranger's data and an unparseable entry should drop the candidate rather than throw.
         return market.Transports?.Nostr?.Relays
             .Select(r => Uri.TryCreate(r, UriKind.Absolute, out var parsed) ? parsed : null)
@@ -75,55 +86,62 @@ public sealed class ArkadeSolverSelector(
             : null;
     }
 
-    /// <summary>The widest size range any listed solver serves on this corridor.</summary>
+    /// <summary>Whether anyone will trade this corridor at all.</summary>
     /// <param name="cancellationToken">Cancels the registry fetch.</param>
-    /// <returns>The range, or <c>null</c> when nothing can be said about it.</returns>
     /// <remarks>
-    /// The union rather than one solver's range, because the choice of solver is made per trade: an
-    /// amount only one of them serves is still an amount this store can be paid. Used to advertise a
-    /// range up front — an LNURL offer, a checkout — where there is no amount to select on yet.
-    /// A named solver publishes nothing, so it constrains nothing here.
+    /// The question worth asking before offering Lightning at a checkout: not whether a particular
+    /// amount clears, which only a quote can answer, but whether there is a counterparty. A named
+    /// solver is taken at its word.
+    /// </remarks>
+    public async Task<bool> HasLightningSolverAsync(CancellationToken cancellationToken = default) =>
+        HasExplicitSolver || (await LightningMarketsAsync(cancellationToken)).Count > 0;
+
+    /// <summary>The widest amount range a payer can be asked for on this corridor.</summary>
+    /// <param name="cancellationToken">Cancels the registry fetch.</param>
+    /// <returns>The range in sats, or <c>null</c> when nothing can be said about it.</returns>
+    /// <remarks>
+    /// <para>
+    /// Read off the quote side, because that is the Lightning leg — what the payer actually sends.
+    /// The base side bounds the Arkade leg, which is a different number once the solver's fee is in
+    /// it, and advertising one in place of the other is how a payer is invited to send an amount
+    /// that cannot settle.
+    /// </para>
+    /// <para>
+    /// The union across solvers rather than one solver's range, because the choice is made per
+    /// payment: an amount only one of them serves is still an amount this store can be paid. A named
+    /// solver publishes nothing, so it constrains nothing here.
+    /// </para>
     /// </remarks>
     public async Task<(long Min, long Max)?> ServedRangeAsync(CancellationToken cancellationToken = default)
     {
-        if (HasExplicitSolver || discovery is null || networkName is null)
+        if (HasExplicitSolver)
         {
             return null;
         }
 
-        var corridors = (await DiscoverAsync(cancellationToken))
-            .Where(m => m.PairKey() == WantedPair && m.MaxBaseAmount > 0)
+        var bounded = (await LightningMarketsAsync(cancellationToken))
+            .Where(m => m.MaxQuoteAmount > 0)
             .ToList();
 
-        return corridors.Count == 0
+        return bounded.Count == 0
             ? null
-            : (corridors.Min(m => m.MinBaseAmount), corridors.Max(m => m.MaxBaseAmount));
+            : (bounded.Min(m => m.MinQuoteAmount), bounded.Max(m => m.MaxQuoteAmount));
     }
-
-    /// <summary>Whether any listed solver serves a Lightning trade of this size.</summary>
-    /// <param name="amountSats">The size being traded.</param>
-    /// <param name="cancellationToken">Cancels the registry fetch.</param>
-    public async Task<bool> ServesAsync(long amountSats, CancellationToken cancellationToken = default) =>
-        HasExplicitSolver || (await ServingMarketsAsync(amountSats, cancellationToken)).Count > 0;
 
     /// <summary>The corridor's canonical identity: arkade bitcoin against Lightning bitcoin.</summary>
     private static string WantedPair =>
         $"{SolverMarket.ArkadeCorridor}:{BitcoinAssetId}/{LightningCorridor}:{BitcoinAssetId}";
 
-    private async Task<IReadOnlyList<IndexedMarket>> ServingMarketsAsync(
-        long amountSats, CancellationToken cancellationToken)
+    /// <summary>Every listed market on this corridor that can actually be dialled.</summary>
+    private async Task<IReadOnlyList<IndexedMarket>> LightningMarketsAsync(CancellationToken cancellationToken)
     {
         if (discovery is null || networkName is null)
         {
             return [];
         }
 
-        var markets = await DiscoverAsync(cancellationToken);
-
-        // Corridor, then size, then cost — FilterAndRank does all three, and ranks on the total fee
-        // at this size rather than on the spread.
-        return SolverDiscoveryService
-            .FilterAndRank(markets, BitcoinAssetId, BitcoinAssetId, amountSats, quoteCorridor: LightningCorridor)
+        return (await DiscoverAsync(cancellationToken))
+            .Where(m => m.PairKey() == WantedPair)
             .Where(m => m.DiscoveryPubkey is { Length: > 0 } && m.Transports?.Nostr?.Relays.Count > 0)
             .ToList();
     }
@@ -136,8 +154,9 @@ public sealed class ArkadeSolverSelector(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // A registry that cannot be fetched means no solver was found, not a failed payment: the
-            // caller withdraws the offer, which is the same thing it does for an empty registry.
+            // The registry client already falls back to its last good copy, so reaching here means
+            // there has never been one. No solver was found, which is not a failed payment: the
+            // caller withdraws the offer, the same thing it does for an empty registry.
             return [];
         }
     }
