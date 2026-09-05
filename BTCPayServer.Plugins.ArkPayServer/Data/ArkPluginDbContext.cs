@@ -12,7 +12,6 @@ public class ArkPluginDbContext(DbContextOptions<ArkPluginDbContext> options) : 
     public DbSet<ArkIntentEntity> Intents { get; set; }
     public DbSet<ArkIntentVtxoEntity> IntentVtxos { get; set; }
     
-    public DbSet<ArkSwapEntity> Swaps { get; set; }// todo - will be replaced with bottom one 
     public DbSet<ArkadeSwapIntentEntity> ArkadeIntentSwaps { get; set; }
 
 
