@@ -94,11 +94,6 @@ public class ArkadePaymentMethodHandler(
                 };
                 var boardingContract = new ArkBoardingContract(
                     serverInfo.SignerKey, serverInfo.BoardingExit, userDescriptor);
-                await contractService.ImportContract(
-                    arkadePaymentMethodConfig.WalletId,
-                    boardingContract,
-                    metadata: new Dictionary<string, string> { ["Source"] = $"invoice:{context.InvoiceEntity.Id}" },
-                    cancellationToken: CancellationToken.None);
 
                 var network = btcPayServerEnvironment.NetworkType == ChainName.Mainnet
                     ? Network.Main
@@ -112,13 +107,44 @@ public class ArkadePaymentMethodHandler(
                 context.TrackedDestinations.Add(boardingAddress.ToString());
                 context.TrackedDestinations.Add(boardingContract.GetScriptPubKey().ToHex());
 
-                // Trigger sync so NBXplorer starts tracking this boarding address immediately
-                _ = Task.Run(() => boardingUtxoSyncService.SyncAsync(CancellationToken.None));
-
                 var swap = arkadePaymentMethodConfig.OnchainSwapEnabled
                     ? await NegotiateOnchainSwapAsync(
                         arkadePaymentMethodConfig.WalletId, amountSats, boardingAddress)
                     : null;
+
+                // Imported after the negotiation, because the Source tag depends on which role this
+                // contract ends up in, and the two roles have opposite lifetimes.
+                //
+                // As an offered method it belongs to the invoice: `ToggleArkadeContract` deactivates
+                // every contract tagged `invoice:{id}` once the invoice stops being New, which is
+                // right — nobody should be paying it after that.
+                //
+                // As a swap's refund sink it has to OUTLIVE the invoice. The refund cannot be pushed
+                // until the L1 locktime, hours later and long after the invoice expired, and a
+                // contract deactivated by then is a script nobody is watching when the money finally
+                // lands on it. That is a silent loss, so the tag is deliberately one the invoice
+                // sweep does not match.
+                // Only when it will actually be used: as the swap's refund sink, or as a method this
+                // store offers. With boarding switched off and a swap that could not be negotiated,
+                // it is neither — importing it anyway would leave a contract nothing pays and the
+                // sync service still watches.
+                var boardingSource = swap is not null
+                    ? $"swap-refund:{swap.RfqId}"
+                    : arkadePaymentMethodConfig.BoardingEnabled
+                        ? $"invoice:{context.InvoiceEntity.Id}"
+                        : null;
+
+                if (boardingSource is not null)
+                {
+                    await contractService.ImportContract(
+                        arkadePaymentMethodConfig.WalletId,
+                        boardingContract,
+                        metadata: new Dictionary<string, string> { ["Source"] = boardingSource },
+                        cancellationToken: CancellationToken.None);
+
+                    // Trigger sync so NBXplorer starts tracking this boarding address immediately
+                    _ = Task.Run(() => boardingUtxoSyncService.SyncAsync(CancellationToken.None));
+                }
 
                 if (swap is not null)
                 {
