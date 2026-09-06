@@ -99,6 +99,12 @@ public class ArkadeCheckoutModelExtension: ICheckoutModelExtension, IGlobalCheck
             var details = _handler.ParsePaymentPromptDetails(context.Prompt.Details);
             if (!string.IsNullOrEmpty(details.BoardingAddress))
                 context.Model.AdditionalData["hasBoardingAddress"] = JToken.FromObject(true);
+
+            // The swap and boarding are mutually exclusive by construction, but the checkout still
+            // needs to tell them apart: they settle on different clocks, and the swap's address
+            // will not accept a near miss.
+            if (!string.IsNullOrEmpty(details.SwapHtlcAddress))
+                context.Model.AdditionalData["hasSwapAddress"] = JToken.FromObject(true);
         }
     }
 

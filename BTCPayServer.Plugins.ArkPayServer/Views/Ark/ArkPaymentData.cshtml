@@ -39,9 +39,18 @@
 		                 || (!string.IsNullOrEmpty(promptDetails.BoardingAddress)
 		                     && string.Equals(paymentDestination, promptDetails.BoardingAddress, StringComparison.OrdinalIgnoreCase));
 
-		var address = isBoarding && !string.IsNullOrEmpty(promptDetails.BoardingAddress)
-			? promptDetails.BoardingAddress
-			: paymentDestination;
+		// A swap's L1 HTLC is a third destination this invoice can legitimately be paid at, and it
+		// belongs to neither of the two above: not the Arkade contract, and not the boarding
+		// address — which on that path is only where a failed swap's refund lands. Without this the
+		// payment renders as an unrecognised destination.
+		var isSwap = !string.IsNullOrEmpty(promptDetails.SwapHtlcAddress)
+		             && string.Equals(paymentDestination, promptDetails.SwapHtlcAddress, StringComparison.OrdinalIgnoreCase);
+
+		var address = isSwap
+			? promptDetails.SwapHtlcAddress
+			: isBoarding && !string.IsNullOrEmpty(promptDetails.BoardingAddress)
+				? promptDetails.BoardingAddress
+				: paymentDestination;
 		var contractString = isBoarding && !string.IsNullOrEmpty(promptDetails.BoardingContractString)
 			? promptDetails.BoardingContractString
 			: promptDetails.ContractString;
