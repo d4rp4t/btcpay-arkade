@@ -141,7 +141,7 @@ public partial class ArkController(
     /// index, finalizes pending txs and resyncs offchain funds, then syncs boarding
     /// (on-chain) UTXOs. <c>IWalletRecoveryService</c> now comes from NArk.Core and is always
     /// registered — it used to arrive with the swaps package, so recovery silently degraded to a
-    /// boarding-only sync for any store that had not configured Boltz.
+    /// boarding-only sync for any store without the swaps package configured.
     /// </summary>
     private void StartBackgroundRecovery(string walletId)
     {

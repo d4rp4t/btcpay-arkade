@@ -1,38 +1,9 @@
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Abstractions.Extensions;
 using BTCPayServer.Client;
-using BTCPayServer.Data;
-using BTCPayServer.Lightning;
-using BTCPayServer.Payments;
-using BTCPayServer.Payments.Lightning;
-using BTCPayServer.Plugins.ArkPayServer.Exceptions;
-using BTCPayServer.Plugins.ArkPayServer.Lightning;
-using BTCPayServer.Plugins.ArkPayServer.Models;
-using BTCPayServer.Plugins.ArkPayServer.Models.Api;
 using BTCPayServer.Plugins.ArkPayServer.Models.Api.Greenfield;
-using BTCPayServer.Plugins.ArkPayServer.PaymentHandler;
-using BTCPayServer.Plugins.ArkPayServer.Services;
-using BTCPayServer.Services.Invoices;
-using BTCPayServer.Services.Stores;
-using LNURL;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
-using NArk.Abstractions;
-using NArk.Abstractions.Blockchain;
-using NArk.Abstractions.Contracts;
-using NArk.Abstractions.Extensions;
-using NArk.Abstractions.Fees;
-using NArk.Abstractions.Intents;
-using NArk.Abstractions.VTXOs;
-using NArk.Abstractions.Wallets;
-using NArk.Core.Contracts;
-using NArk.Core.Services;
-using NArk.Core.Transport;
-using NArk.Core.Wallet;
-using NArk.Hosting;
-using NBitcoin;
-using NBitcoin.Scripting;
 
 namespace BTCPayServer.Plugins.ArkPayServer.Controllers;
 
@@ -42,7 +13,7 @@ public partial class ArkGreenfieldController
     /// Report the Arkade swap solver this store's Lightning corridors run through.
     /// </summary>
     /// <remarks>
-    /// This replaces the <c>boltz-limits</c> endpoint and does not carry limits, because there are
+    /// This replaces the old limits endpoint and does not carry limits, because there are
     /// none to publish: an Arkade solver quotes its terms per request over RFQ, so the only way to
     /// state a minimum, a maximum or a fee would be to open a negotiation on behalf of a caller that
     /// asked a read-only question. What a caller can act on is whether a corridor exists at all and

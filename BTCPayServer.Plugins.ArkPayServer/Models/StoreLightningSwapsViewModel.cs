@@ -7,7 +7,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Models;
 /// </summary>
 /// <remarks>
 /// Separate from <see cref="StoreSwapsViewModel"/> rather than folded into it. They look alike from a
-/// distance — both are swaps with a status and an amount — but a Boltz swap is history now and an
+/// distance — both are swaps with a status and an amount — but the older kind is history now and an
 /// intent corridor is the live payment path, and the two answer different questions. A merchant
 /// reading this page wants to know whether today's money arrived; a merchant reading the other one
 /// wants to know what is left over from before.

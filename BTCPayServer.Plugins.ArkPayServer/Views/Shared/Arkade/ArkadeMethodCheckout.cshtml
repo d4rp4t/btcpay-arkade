@@ -3,9 +3,6 @@
 @inject ArkadeLightningAvailabilityService Availability
 @model BTCPayServer.Models.InvoicingModels.CheckoutModel
 
-@using NBitcoin
-@using System.Globalization
-@using System.Text.RegularExpressions
 @{
     // Whether to offer Lightning here at all: the store's own configuration, plus whether a solver
     // is listed to settle it. The amount is not vetted — a solver quotes its terms per request.

@@ -358,7 +358,7 @@ public partial class ArkController
                 result.LnurlMinSats = (long)info.MinSendable.ToUnit(LightMoneyUnit.Satoshi);
                 result.LnurlMaxSats = (long)info.MaxSendable.ToUnit(LightMoneyUnit.Satoshi);
 
-                // The LNURL endpoint's own range is the whole range now. The Boltz integration this
+                // The LNURL endpoint's own range is the whole range now. What this
                 // replaced narrowed it to published swap limits; an Arkade solver quotes its terms per
                 // request, so an amount it will not take is refused at quoting time with its own
                 // reason rather than excluded from a range guessed at beforehand.

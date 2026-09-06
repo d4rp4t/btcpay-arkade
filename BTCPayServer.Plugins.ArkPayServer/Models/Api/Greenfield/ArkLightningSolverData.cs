@@ -4,7 +4,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Models.Api.Greenfield;
 /// The Arkade swap solver a store's Lightning corridors run through.
 /// </summary>
 /// <remarks>
-/// Carries no limits or fees, unlike the Boltz-era shape it replaces. A solver quotes its terms per
+/// Carries no limits or fees, unlike the shape it replaces. A solver quotes its terms per
 /// request over RFQ rather than publishing them, so any figure here would have to come from a
 /// negotiation opened to answer a read-only call — or be invented. It carries no direction flags
 /// either: both corridors work wherever a solver does, so the endpoint answering at all is the

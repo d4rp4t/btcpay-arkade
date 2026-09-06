@@ -53,14 +53,15 @@ public class ArkParsedDestinationData
     public bool IsLnurl { get; set; }
 
     /// <summary>
-    /// Minimum sendable amount (in sats) advertised by an LNURL endpoint, intersected with
-    /// Boltz submarine swap limits when available.
+    /// Minimum sendable amount (in sats) advertised by an LNURL endpoint. Not intersected with a
+    /// corridor's own bounds: a solver quotes its terms per request, so the only honest narrowing
+    /// happens at the quote.
     /// </summary>
     public long LnurlMinSats { get; set; }
 
     /// <summary>
-    /// Maximum sendable amount (in sats) advertised by an LNURL endpoint, intersected with
-    /// Boltz submarine swap limits when available.
+    /// Maximum sendable amount (in sats) advertised by an LNURL endpoint. See <see cref="MinSendable"/>
+    /// for why no corridor bound is folded in.
     /// </summary>
     public long LnurlMaxSats { get; set; }
 

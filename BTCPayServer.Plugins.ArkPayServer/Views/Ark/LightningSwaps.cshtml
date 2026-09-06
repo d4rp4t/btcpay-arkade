@@ -19,8 +19,25 @@
         _ => "text-bg-info"
     };
 
-    string Direction(ArkadeSwapIntentType t) =>
-        t == ArkadeSwapIntentType.LightningToBtc ? "Received" : "Sent";
+    // Which way the money moved, for every corridor rather than for Lightning alone. Reading a
+    // single type as "received" and everything else as "sent" was right while Lightning was the
+    // only corridor; an on-board is money coming IN, and showing it as sent is the kind of wrong a
+    // merchant reconciles against.
+    bool Received(ArkadeSwapIntentType t) =>
+        t is ArkadeSwapIntentType.LightningToBtc
+            or ArkadeSwapIntentType.OnchainToBtc
+            or ArkadeSwapIntentType.AssetToBtc;
+
+    string Direction(ArkadeSwapIntentType t) => Received(t) ? "Received" : "Sent";
+
+    // The rail it settled on. Both legs of every corridor here are bitcoin except the asset ones,
+    // so without this two rows can look identical while being different swaps entirely.
+    string Rail(ArkadeSwapIntentType t) => t switch
+    {
+        ArkadeSwapIntentType.BtcToLightning or ArkadeSwapIntentType.LightningToBtc => "Lightning",
+        ArkadeSwapIntentType.BtcToOnchain or ArkadeSwapIntentType.OnchainToBtc => "Onchain",
+        _ => "Asset",
+    };
 }
 
 <div class="sticky-header d-flex align-items-center justify-content-between">
@@ -54,17 +71,19 @@ else
             <thead>
                 <tr>
                     <th text-translate="true">Created</th>
+                    <th text-translate="true">Rail</th>
                     <th text-translate="true">Direction</th>
                     <th text-translate="true">Status</th>
                     <th class="text-end" text-translate="true">Amount</th>
                     <th class="text-end" text-translate="true">Fee</th>
+                    <th text-translate="true">Solver</th>
                     <th text-translate="true">Payment hash</th>
                 </tr>
             </thead>
             <tbody>
             @foreach (var swap in Model.Swaps)
             {
-                var received = swap.Type == ArkadeSwapIntentType.LightningToBtc;
+                var received = Received(swap.Type);
 
                 @* The spread, and which side of it the merchant sees. Sending, we lock more than the
                    invoice is for; receiving, we are credited less than the payer was billed. Either
@@ -75,10 +94,25 @@ else
 
                 <tr>
                     <td>@swap.CreatedAt.ToBrowserDate()</td>
+                    <td>@Rail(swap.Type)</td>
                     <td>@Direction(swap.Type)</td>
                     <td><span class="badge @Badge(swap.Status)">@swap.Status</span></td>
                     <td class="text-end font-monospace">@billed.Satoshi.ToString("N0") sats</td>
                     <td class="text-end font-monospace text-secondary">@fee.Satoshi.ToString("N0") sats</td>
+                    <td>
+                        @{ var solver = swap.SolverPubkey(); }
+                        @if (!string.IsNullOrEmpty(solver))
+                        {
+                            <vc:truncate-center text="@solver" classes="truncate-center-id" />
+                        }
+                        else
+                        {
+                            @* Rows written before the solver was recorded. Blank rather than a guess:
+                               the counterparty is chosen per payment, so configuration cannot say
+                               which one this was. *@
+                            <span class="text-secondary">&mdash;</span>
+                        }
+                    </td>
                     <td>
                         @if (!string.IsNullOrEmpty(swap.PaymentHash))
                         {

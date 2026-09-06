@@ -1,20 +1,14 @@
 using BTCPayServer.Abstractions.Constants;
 using BTCPayServer.Abstractions.Extensions;
-using BTCPayServer.Client;
 using BTCPayServer.Data;
-using BTCPayServer.Lightning;
 using BTCPayServer.Payments;
 using BTCPayServer.Payments.Lightning;
-using BTCPayServer.Plugins.ArkPayServer.Exceptions;
 using BTCPayServer.Plugins.ArkPayServer.Lightning;
-using BTCPayServer.Plugins.ArkPayServer.Models;
-using BTCPayServer.Plugins.ArkPayServer.Models.Api;
 using BTCPayServer.Plugins.ArkPayServer.Models.Api.Greenfield;
 using BTCPayServer.Plugins.ArkPayServer.PaymentHandler;
 using BTCPayServer.Plugins.ArkPayServer.Services;
 using BTCPayServer.Services.Invoices;
 using BTCPayServer.Services.Stores;
-using LNURL;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Mvc;
@@ -32,7 +26,6 @@ using NArk.Core.Transport;
 using NArk.Core.Wallet;
 using NArk.Hosting;
 using NBitcoin;
-using NBitcoin.Scripting;
 
 namespace BTCPayServer.Plugins.ArkPayServer.Controllers;
 

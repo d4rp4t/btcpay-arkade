@@ -65,7 +65,7 @@ public class ArkadePaymentLinkExtension : IPaymentLinkExtension
             }
         }
         
-        // Add lightning invoice if available and within Boltz limits (prefer LN over LNURL)
+        // Add the Lightning invoice when there is one (preferred over LNURL).
         if (ShouldIncludeLightning(prompt).Result)
         {
             if (ln is not null)

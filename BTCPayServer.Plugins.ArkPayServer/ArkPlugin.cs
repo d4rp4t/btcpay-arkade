@@ -130,9 +130,9 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
             {
                 var pattern = $"%{searchText}%";
                 return query.Where(c =>
-                    Microsoft.EntityFrameworkCore.EF.Functions.ILike(c.Script, pattern) ||
-                    Microsoft.EntityFrameworkCore.EF.Functions.ILike(c.Type, pattern) ||
-                    Microsoft.EntityFrameworkCore.EF.Functions.ILike(c.MetadataJson ?? "", pattern));
+                    EF.Functions.ILike(c.Script, pattern) ||
+                    EF.Functions.ILike(c.Type, pattern) ||
+                    EF.Functions.ILike(c.MetadataJson ?? "", pattern));
             };
         });
     }
@@ -239,7 +239,7 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
             });
 
         // Wallet provider
-        services.AddSingleton<NArk.Abstractions.Wallets.IWalletProvider, NArk.Core.Wallet.DefaultWalletProvider>();
+        services.AddSingleton<IWalletProvider, NArk.Core.Wallet.DefaultWalletProvider>();
 
         // BoardingUtxoSyncService consumes IBitcoinBlockchain.GetUtxosAsync — the
         // NBXplorer-backed registration above implements it for boarding lookup.
@@ -378,7 +378,7 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         services.AddSingleton<ArkadeLNURLPayRequestFilter>();
         services.AddSingleton<IPluginHookFilter>(sp => sp.GetRequiredService<ArkadeLNURLPayRequestFilter>());
 
-        // The "Use Arkade" option on BTCPay's Lightning setup screen. Previously gated on Boltz being
+        // The "Use Arkade" option on BTCPay's Lightning setup screen. Previously gated on a swap provider being
         // configured, which made the option vanish rather than explain itself; a store that picks it
         // without a solver now gets a validation error naming what is missing.
         services.AddUIExtension("ln-payment-method-setup-tabhead", "/Views/Ark/ArkLNSetupTabhead.cshtml");
@@ -394,9 +394,9 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
     /// </summary>
     /// <remarks>
     /// <para>
-    /// All that is left of the Boltz era. Nothing creates a VHTLC any more — the Lightning corridor
+    /// All that is left of the pre-corridor era. Nothing creates a VHTLC any more — the Lightning corridor
     /// negotiates a covenant with an Arkade solver instead — and the SDK dropped its swaps package
-    /// entirely, so the swap rows, the Boltz client and the swaps page went with it.
+    /// entirely, so the swap rows, its provider client and the swaps page went with it.
     /// </para>
     /// <para>
     /// These two did not, because they are what a VHTLC still holding sats depends on: the policy
@@ -406,8 +406,8 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
     /// for it, which is why they were ported into the plugin rather than deleted.
     /// </para>
     /// <para>
-    /// Unconditional, and deliberately not gated on any Boltz configuration. An operator who
-    /// finishes migrating and deletes `boltz` from ark.json is doing the obvious thing; that must
+    /// Unconditional, and deliberately not gated on any provider configuration. An operator who
+    /// finishes migrating and clears the old settings is doing the obvious thing; that must
     /// not be what strands their remaining funds.
     /// </para>
     /// </remarks>
@@ -451,7 +451,6 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         return new ArkNetworkConfig(
             ArkUri: !string.IsNullOrEmpty(fileConfig?.ArkUri) ? fileConfig.ArkUri : preset.ArkUri,
             ArkadeWalletUri: !string.IsNullOrEmpty(fileConfig?.ArkadeWalletUri) ? fileConfig.ArkadeWalletUri : preset.ArkadeWalletUri,
-            BoltzUri: !string.IsNullOrEmpty(fileConfig?.BoltzUri) ? fileConfig.BoltzUri : preset.BoltzUri,
             ExplorerUri: !string.IsNullOrEmpty(fileConfig?.ExplorerUri) ? fileConfig.ExplorerUri : preset.ExplorerUri,
             // EsploraUri / ElectrumWsUri / ElectrumTcpUri arrived in
             // ArkNetworkConfig via NNark dotnet-sdk#96. They MUST be carried
@@ -503,7 +502,6 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
             return new ArkNetworkConfig(
                 ArkUri: "https://signet.arkade.sh",
                 ArkadeWalletUri: "https://signet.arkade.money",
-                BoltzUri: null,
                 ExplorerUri: "https://explorer.signet.arkade.sh",
                 // Signet endpoints mirror the canonical ts-sdk defaults
                 // (https://github.com/arkade-os/ts-sdk/blob/main/src/providers/onchain.ts

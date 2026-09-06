@@ -20,7 +20,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Lightning;
 /// </para>
 /// <para>
 /// It deliberately does not pre-check the amount, which is why it is no longer named for limits.
-/// The Boltz integration this replaced could, because Boltz published its limits as an endpoint;
+/// What this replaced could, because it published its limits as an endpoint;
 /// an Arkade solver's terms are per-quote, and the only way to learn them is to open a negotiation
 /// — far too expensive to do while rendering a checkout page, and stale by the time the customer
 /// pays. An amount a solver will not take is refused at the point of quoting, with the solver's own

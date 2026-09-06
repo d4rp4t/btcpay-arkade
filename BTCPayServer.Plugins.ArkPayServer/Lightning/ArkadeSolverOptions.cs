@@ -102,6 +102,7 @@ public class ArkadeSolverOptions
     /// </remarks>
     public static ArkadeSolverOptions ForNetwork(ChainName network)
     {
+        // todo(6.09.2026): this one should be in the network config
         if (network == ChainName.Regtest)
         {
             return new ArkadeSolverOptions

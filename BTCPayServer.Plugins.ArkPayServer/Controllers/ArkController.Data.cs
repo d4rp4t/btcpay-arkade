@@ -110,10 +110,14 @@ public partial class ArkController
 
         var statusFilter = ParseEnumFilter<ArkadeSwapIntentStatus>(searchTerm, "status", s => s switch
         {
+            "funding" => ArkadeSwapIntentStatus.Funding,
             "pending" => ArkadeSwapIntentStatus.Pending,
             "claimable" => ArkadeSwapIntentStatus.Claimable,
+            "cancelling" => ArkadeSwapIntentStatus.Cancelling,
             "fulfilled" => ArkadeSwapIntentStatus.Fulfilled,
             "refundable" => ArkadeSwapIntentStatus.Refundable,
+            "recoverable" => ArkadeSwapIntentStatus.Recoverable,
+            "resolved" => ArkadeSwapIntentStatus.Resolved,
             "cancelled" => ArkadeSwapIntentStatus.Cancelled,
             _ => null
         });
