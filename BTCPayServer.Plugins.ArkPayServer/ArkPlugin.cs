@@ -33,7 +33,8 @@ using NArk.ArkadeIntents.Services;
 using NBitcoin;
 using System.Text.Json;
 using BTCPayServer.Plugins.ArkPayServer.Services.Policies;
-using BTCPayServer.Plugins.ArkPayServer.Services.Legacy;
+using NArk.Swaps.Policies;
+using NArk.Swaps.Transformers;
 using Microsoft.EntityFrameworkCore;
 using NArk.Core.Sweeper;
 using NArk.Core.Transformers;
@@ -412,8 +413,15 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
     /// </remarks>
     private static void RegisterLegacyVhtlcDrain(IServiceCollection services)
     {
-        services.AddSingleton<ISweepPolicy, LegacyVhtlcSweepPolicy>();
-        services.AddSingleton<IContractTransformer, LegacyVhtlcContractTransformer>();
+        // Both live in NArk.Core, still under their old `NArk.Swaps.*` namespaces and marked
+        // obsolete: when the swaps package went, upstream moved these two rather than deleting
+        // them, precisely so a VHTLC still holding sats stays drainable. The obsolete warning is
+        // the intended signal — it marks a path that exists to be emptied, not built on — so it is
+        // suppressed here with that in mind rather than worked around by copying the code.
+#pragma warning disable CS0612 // Type or member is obsolete
+        services.AddSingleton<ISweepPolicy, SwapSweepPolicy>();
+        services.AddSingleton<IContractTransformer, VHTLCContractTransformer>();
+#pragma warning restore CS0612
     }
 
     #endregion
