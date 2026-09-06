@@ -58,6 +58,7 @@ public partial class ArkGreenfieldController
             Destination = wallet?.Destination,
             AllowSubDustAmounts = config.AllowSubDustAmounts,
             BoardingEnabled = config.BoardingEnabled,
+            OnchainSwapEnabled = config.OnchainSwapEnabled,
             MinBoardingAmountSats = config.MinBoardingAmountSats,
             LightningEnabled = IsArkadeLightningEnabled()
         });
@@ -189,9 +190,25 @@ public partial class ArkGreenfieldController
         }
 
         // Handle boarding settings
+        if (request.OnchainSwapEnabled is { } swapEnabled)
+        {
+            // The swap's refund lands on the boarding address, so the two cannot be set
+            // independently: enabling one requires the other, and disabling boarding takes the
+            // swap with it. Applied before BoardingEnabled so an explicit `false` there still wins.
+            newConfig = newConfig with
+            {
+                OnchainSwapEnabled = swapEnabled,
+                BoardingEnabled = swapEnabled || newConfig.BoardingEnabled,
+            };
+        }
+
         if (request.BoardingEnabled is { } boardingEnabled)
         {
-            newConfig = newConfig with { BoardingEnabled = boardingEnabled };
+            newConfig = newConfig with
+            {
+                BoardingEnabled = boardingEnabled,
+                OnchainSwapEnabled = boardingEnabled && newConfig.OnchainSwapEnabled,
+            };
         }
 
         if (request.MinBoardingAmountSats is { } minAmount)

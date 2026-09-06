@@ -19,6 +19,9 @@ public class StoreOverviewViewModel
     public string? DefaultAddress { get; set; }
     public bool AllowSubDustAmounts { get; set; }
     public bool BoardingEnabled { get; set; }
+
+    /// <summary>Whether the fast onchain path is offered when a solver quotes it.</summary>
+    public bool OnchainSwapEnabled { get; set; }
     public long MinBoardingAmountSats { get; set; }
 
     /// <summary>
