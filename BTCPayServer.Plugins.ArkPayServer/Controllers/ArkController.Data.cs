@@ -81,7 +81,7 @@ public partial class ArkController
     [HttpGet("stores/{storeId}/swaps")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     /// <summary>
-    /// Lists the store's Arkade Lightning swaps.
+    /// Lists the store's Arkade swaps, on every rail the corridors cover.
     /// </summary>
     /// <remarks>
     /// Read straight from intent storage rather than through the Lightning client. The client is
@@ -90,7 +90,7 @@ public partial class ArkController
     /// </remarks>
     [HttpGet("stores/{storeId}/lightning-swaps")]
     [Authorize(Policy = Policies.CanViewStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> LightningSwaps(
+    public async Task<IActionResult> Swaps(
         string storeId,
         string? searchTerm = null,
         int skip = 0,
@@ -101,7 +101,7 @@ public partial class ArkController
 
         if (!config!.GeneratedByStore || arkadeIntentStorage is null)
         {
-            return View(new StoreLightningSwapsViewModel
+            return View(new StoreSwapsViewModel
             {
                 StoreId = storeId,
                 SolverConfigured = arkadeSolver.IsConfigured
@@ -127,7 +127,7 @@ public partial class ArkController
             walletIds: [config.WalletId!],
             cancellationToken: HttpContext.RequestAborted);
 
-        return View(new StoreLightningSwapsViewModel
+        return View(new StoreSwapsViewModel
         {
             StoreId = storeId,
             SolverConfigured = arkadeSolver.IsConfigured,

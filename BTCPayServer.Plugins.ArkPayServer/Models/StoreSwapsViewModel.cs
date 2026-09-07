@@ -3,7 +3,7 @@ using NArk.ArkadeIntents.Models;
 namespace BTCPayServer.Plugins.ArkPayServer.Models;
 
 /// <summary>
-/// The store's Arkade Lightning swaps, for the page that lists them.
+/// The store's Arkade swaps — every rail, not just Lightning — for the page that lists them.
 /// </summary>
 /// <remarks>
 /// Separate from <see cref="StoreSwapsViewModel"/> rather than folded into it. They look alike from a
@@ -12,7 +12,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Models;
 /// reading this page wants to know whether today's money arrived; a merchant reading the other one
 /// wants to know what is left over from before.
 /// </remarks>
-public class StoreLightningSwapsViewModel : StoreCollectionViewModelBase
+public class StoreSwapsViewModel : StoreCollectionViewModelBase
 {
     /// <summary>The swaps, newest first.</summary>
     public IReadOnlyCollection<ArkadeSwapIntent> Swaps { get; set; } = [];

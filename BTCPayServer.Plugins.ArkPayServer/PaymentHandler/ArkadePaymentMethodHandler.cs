@@ -1,11 +1,13 @@
 using BTCPayServer.Data;
 using NArk.ArkadeIntents.Services;
+using NArk.ArkadeIntents.Rfq;
 using NArk.ArkadeIntents.Onchain;
 using BTCPayServer.Plugins.ArkPayServer.Lightning;
 using Microsoft.Extensions.Logging;
 using BTCPayServer.Payments;
 using BTCPayServer.Services;
 using NArk.Core;
+using NArk.Abstractions.Contracts;
 using NArk.Abstractions.Wallets;
 using NArk.Core.Contracts;
 using NArk.Core.Services;
@@ -109,7 +111,7 @@ public class ArkadePaymentMethodHandler(
 
                 var swap = arkadePaymentMethodConfig.OnchainSwapEnabled
                     ? await NegotiateOnchainSwapAsync(
-                        arkadePaymentMethodConfig.WalletId, amountSats, boardingAddress)
+                        arkadePaymentMethodConfig.WalletId, amountSats, boardingAddress, contract)
                     : null;
 
                 // Imported after the negotiation, because the Source tag depends on which role this
@@ -157,6 +159,13 @@ public class ArkadePaymentMethodHandler(
                         SwapFundAmountSats = swap.FundAmountSats,
                         SwapId = swap.RfqId,
                     };
+                    // Registered so the invoice can be found from the address a payer was shown —
+                    // a support question, a webhook, a manual reconciliation. It credits NOTHING on
+                    // its own: crediting runs off VTXO events, and nothing imports the L1 HTLC as a
+                    // contract, so no event ever names this script. That is the intended shape
+                    // rather than an omission. The swap is not the merchant's money while it sits in
+                    // the HTLC — it becomes theirs when the claim lands on the prompt's own address,
+                    // which is the destination registered above, and that is the one credit.
                     context.TrackedDestinations.Add(swap.HtlcAddress);
                 }
                 else if (arkadePaymentMethodConfig.BoardingEnabled)
@@ -181,6 +190,10 @@ public class ArkadePaymentMethodHandler(
     /// Where the L1 refund goes if the swap never settles — this invoice's own boarding address, so
     /// a failed swap degrades into the slow path rather than into a reconciliation problem.
     /// </param>
+    /// <param name="payoutContract">
+    /// The contract this invoice already derived, reused as the swap's payout. Load-bearing — see
+    /// the remarks before changing it.
+    /// </param>
     /// <returns>The negotiated on-board, or <c>null</c> when this path is not available.</returns>
     /// <remarks>
     /// <para>
@@ -192,9 +205,35 @@ public class ArkadePaymentMethodHandler(
     /// The corridor is asked for by name: a solver listed for Lightning is not thereby listed for
     /// onchain.
     /// </para>
+    /// <para>
+    /// Exact-OUT, unlike the Lightning leg beside it, and the difference is not a preference. What
+    /// credits an invoice here is the VTXO that lands, so pinning the L1 side instead would have the
+    /// solver's fee come out of what the merchant receives and leave every such invoice underpaid by
+    /// it. Lightning credits the BOLT11 amount rather than what lands, so pinning the payer's side
+    /// there is right for the same reason it is wrong here. Exact-out also cannot be refused for
+    /// <c>fee_consumes_swap</c> — the payer's figure is solved up from the payout, so the fee has
+    /// nothing to eat.
+    /// </para>
+    /// <para>
+    /// The payout is this invoice's own contract, and here that is a correctness requirement rather
+    /// than the tidiness it is at the SDK layer. What credits an invoice is
+    /// <see cref="ArkContractInvoiceListener"/> matching an arriving VTXO's address against
+    /// <c>TrackedDestinations</c>, and the only Arkade address registered there is the prompt's own.
+    /// A freshly derived payout is registered nowhere: the claim would succeed, the sats would be in
+    /// the wallet, and the invoice would sit unpaid with nothing in the logs to say why. So passing
+    /// the prompt's contract is what connects the corridor to the invoice at all.
+    /// </para>
+    /// <para>
+    /// It also happens to cost no HD index, which is worth keeping: an HD wallet is restored by
+    /// scanning until `GapLimit` consecutive indices come back unused, and an invoice that is never
+    /// paid leaves whatever it derived behind, so deriving twice per invoice reaches that limit at
+    /// twice the rate and what lies past it a seed restore does not find. The cost of sharing is
+    /// that one key appears in three contracts for one payment, which links them; they are one
+    /// payment, so the link exists regardless.
+    /// </para>
     /// </remarks>
     private async Task<PendingOnchainReceive?> NegotiateOnchainSwapAsync(
-        string walletId, long amountSats, BitcoinAddress refundDestination)
+        string walletId, long amountSats, BitcoinAddress refundDestination, ArkContract payoutContract)
     {
         if (intents is null || solver is null) return null;
 
@@ -212,7 +251,8 @@ public class ArkadePaymentMethodHandler(
                 amountSats, ArkadeSolverSelector.OnchainCorridor,
                 transport => intents.ReceiveFromOnchainAsync(
                     walletId, amountSats, transport, covclaimd, refundDestination,
-                    cancellationToken: timeout.Token),
+                    amountSide: RfqAmountSide.To,
+                    payoutContract: payoutContract, cancellationToken: timeout.Token),
                 timeout.Token);
         }
         catch (Exception e)

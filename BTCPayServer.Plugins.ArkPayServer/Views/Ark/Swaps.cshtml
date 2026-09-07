@@ -1,10 +1,10 @@
 @using BTCPayServer.Abstractions.Contracts
 @using BTCPayServer.Abstractions.Extensions
 @using NArk.ArkadeIntents.Models
-@model BTCPayServer.Plugins.ArkPayServer.Models.StoreLightningSwapsViewModel
+@model BTCPayServer.Plugins.ArkPayServer.Models.StoreSwapsViewModel
 @inject IScopeProvider ScopeProvider
 @{
-    ViewData.SetActivePage(category: "Ark", activePage: "LightningSwaps", title: "Arkade - Lightning swaps");
+    ViewData.SetActivePage(category: "Ark", activePage: "Swaps", title: "Arkade - Swaps");
     var storeId = ScopeProvider.GetCurrentStoreId();
 
     // Status carries the only thing a merchant needs at a glance: whether this swap still wants
@@ -41,7 +41,7 @@
 }
 
 <div class="sticky-header d-flex align-items-center justify-content-between">
-    <h2 class="mb-0" text-translate="true">Lightning swaps</h2>
+    <h2 class="mb-0" text-translate="true">Swaps</h2>
 </div>
 
 <partial name="_StatusMessage" />
