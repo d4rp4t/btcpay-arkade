@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.4.4] - 2026-09-15
+
+### Breaking Changes
+- **Minimum BTCPay Server version raised to 2.4.4** (up from 2.4.2). The plugin is now built against BTCPay Server 2.4.4 and declares `>=2.4.4`; stores running an older BTCPay will not load it. Upgrading also picks up the upstream fixes released across 2.4.3 and 2.4.4.
+
+### SDK (NNark)
+- **Bumped to `arkade-os/dotnet-sdk` master @ `815bd14` (#140)**, from the `303eaf6` that 2.4.3 shipped — 36 commits. The plugin-facing highlights:
+  - **`NArk.Swaps` was removed from the SDK (#196).** The Boltz swap providers and swap management no longer exist upstream, so the plugin's Boltz surface has to go with them.
+  - **Library projects moved from net8.0 to net10.0 (#115)**, matching the plugin and its host.
+  - **`ECXOnlyPubKey` value equality (#140).** The SDK's local `ECXOnlyPubKeyComparer` is gone in favour of the native `Equals`/`==` that `NBitcoin.Secp256k1` 4.0.1 added. Nothing enforces that floor transitively — `NBitcoin` does not depend on `NBitcoin.Secp256k1` at all — so the plugin's own pin moves `4.0.0` → `4.0.1`; leaving it would downgrade the package and silently revert deprecated-signer lookups to reference equality.
+  - **New `NArk.Arkade` package: Arkade Script support (#173)**, plus Arkade Cash (#76) and a threshold-based settlement subsystem (#186).
+  - **Batch settlement hardening.** Operator-supplied batch expiry is bounded before the sweep leaf is committed (#181), transaction-tree finality is validated (#197), the batch session phase machine checks intent outputs before forfeits (#180), and the SDK finalizes the transaction it submitted rather than the one the server names (#183).
+  - **Unilateral exit fixes (#154, #166, #182, #161)** — exit maturity keys off the lock type rather than the raw `nSequence`, and CLTV locktime propagates to the Arkade transaction, not just the checkpoint.
+  - **Pending Arkade transactions are authorized before checkpoints are signed (#179)**, `onchain_output_indexes` reports real output positions (#178), and `GetVtxoChain` pagination is intent-authenticated (#158).
+
+### Compatibility
+- **Package pins realigned with the host.** BTCPay loads plugins with `PreferSharedTypes`, so any assembly the host already has wins over the plugin's copy — the plugin must therefore compile against exactly the versions BTCPay resolves, never ahead of them. Across 2.4.3 and 2.4.4 three of the mirrored pins moved: `NBitcoin` `10.0.10` (from `10.0.8`), `BTCPayServer.Lightning.Common` `1.7.2` (from `1.7.1`), and the `Microsoft.Extensions.*` family to `10.0.11` (from `10.0.10`), matching the shared framework 2.4.3 moved to (`mcr.microsoft.com/dotnet/aspnet:10.0.11-noble`) and 2.4.4 kept. `NBXplorer.Client` `5.0.8`, `Npgsql.EntityFrameworkCore.PostgreSQL` `10.0.3`, Roslyn Workspaces `5.6.0` and `Newtonsoft.Json` `13.0.4` are unchanged from 2.4.2 and still match.
+- **E2E suite follows `BTCPayServer.Tests` to xunit.v3 4.0.0** (`xunit.v3` and `xunit.runner.visualstudio` `4.0.0`, `Microsoft.NET.Test.Sdk` `18.9.0`, `Microsoft.Playwright` `1.62.0`). The suite compiles against `BTCPayServer.Tests`, so its xunit generation has to match. Test-only, no plugin-runtime change.
+
 ## [2.4.3] - 2026-08-18
 
 ### Breaking Changes
