@@ -6,7 +6,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Models.Api.Greenfield;
 public class ArkSendRequest
 {
     /// <summary>
-    /// Destination: Ark address, Bitcoin address, BIP21 URI, or Lightning invoice/LNURL.
+    /// Destination: Arkade address, Bitcoin address, or BIP21 URI.
     /// </summary>
     public string Destination { get; set; } = "";
 
@@ -27,12 +27,7 @@ public class ArkSendRequest
 public class ArkSendResponse
 {
     /// <summary>
-    /// Transaction ID (Ark TX hash or Lightning payment hash).
+    /// The Arkade transaction ID.
     /// </summary>
     public string? TxId { get; set; }
-
-    /// <summary>
-    /// Swap ID if this triggered a Lightning or chain swap.
-    /// </summary>
-    public string? SwapId { get; set; }
 }

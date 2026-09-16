@@ -20,6 +20,5 @@ public class ActivityItem
 public enum ActivityItemType
 {
     Batch,
-    Swap,
     Vtxo
 }

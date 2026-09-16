@@ -2,12 +2,10 @@ using BTCPayServer.Abstractions.Contracts;
 using BTCPayServer.Abstractions.Extensions;
 using BTCPayServer.Abstractions.Models;
 using BTCPayServer.Configuration;
-using BTCPayServer.Lightning;
 using BTCPayServer.Payments;
 using BTCPayServer.PayoutProcessors;
 using BTCPayServer.Payouts;
 using BTCPayServer.Plugins.ArkPayServer.Data;
-using BTCPayServer.Plugins.ArkPayServer.Lightning;
 using BTCPayServer.Plugins.ArkPayServer.Notifications;
 using BTCPayServer.Plugins.ArkPayServer.PaymentHandler;
 using BTCPayServer.Plugins.ArkPayServer.Payouts.Ark;
@@ -27,14 +25,15 @@ using NArk.Core.Models.Options;
 using NArk.Core.Services;
 using NArk.Storage.EfCore.Entities;
 using NArk.Storage.EfCore.Hosting;
-using NArk.Swaps.Boltz;
-using NArk.Swaps.Boltz.Client;
-using NArk.Swaps.Services;
 using NBitcoin;
 using System.Text.Json;
 using BTCPayServer.Plugins.ArkPayServer.Services.Policies;
 using Microsoft.EntityFrameworkCore;
 using NArk.Core.Sweeper;
+using NArk.Core.Transformers;
+using NArk.Swaps.Policies;
+using NArk.Swaps.Transformers;
+using NArk.Abstractions.Contracts;
 
 namespace BTCPayServer.Plugins.ArkPayServer;
 
@@ -75,19 +74,14 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         // UI extensions
         RegisterUIExtensions(services);
 
-        // Boltz swap services (optional)
-        RegisterBoltzServices(services, networkConfig);
+        // Pre-drop Boltz VHTLCs, kept spendable and sweepable.
+        RegisterLegacyVhtlcServices(services);
     }
 
     #region Service Registration
 
     private static void RegisterBtcPayServices(IServiceCollection services)
     {
-        services.AddSingleton<ArkLightningSpendKeyService>();
-        services.AddHostedService<ArkLightningSpendKeyMigration>();
-        services.AddSingleton<ILightningConnectionStringHandler, ArkLightningConnectionStringHandler>();
-        services.AddSingleton<ArkadeLightningLimitsService>();
-
         services.AddSingleton<ArkadePaymentMethodHandler>();
         services.AddSingleton<IPaymentMethodHandler>(sp => sp.GetRequiredService<ArkadePaymentMethodHandler>());
 
@@ -326,37 +320,23 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         services.AddUIExtension("dashboard-setup-guide-payment", "/Views/Ark/DashboardSetupGuidePayment.cshtml");
         services.AddUIExtension("store-invoices-payments", "/Views/Ark/ArkPaymentData.cshtml");
         services.AddUIExtension("store-wallets-nav", "/Views/Ark/ArkWalletNav.cshtml");
-        services.AddUIExtension("ln-payment-method-setup-tab", "/Views/Lightning/LNPaymentMethodSetupTab.cshtml");
         services.AddUIExtension("dashboard", "/Views/Ark/ArkDashboardWidget.cshtml");
         services.AddUIExtension("dashboard", "/Views/Ark/ArkActivityDashboardWidget.cshtml");
     }
 
-    private static void RegisterBoltzServices(IServiceCollection services, ArkNetworkConfig networkConfig)
+    /// <summary>
+    /// Keeps VHTLCs funded before the Boltz drop spendable and sweepable. They used to arrive with
+    /// <c>AddArkSwapServices</c>; neither is Boltz-specific. Drop them only once no VHTLC holds a
+    /// balance, or an in-flight refund is stranded silently.
+    /// </summary>
+    private static void RegisterLegacyVhtlcServices(IServiceCollection services)
     {
-        if (!string.IsNullOrWhiteSpace(networkConfig.BoltzUri))
-        {
-            services.AddHttpClient<BoltzClient>();
-            services.AddHttpClient<CachedBoltzClient>();
-            services.AddArkSwapServices();
-
-            // Tag every Boltz swap-creation request with the BTCPay-Arkade
-            // referral so Boltz can credit the integration. Mirrors the
-            // wallet-side `arkade-money` referral added in arkade-os/wallet#606.
-            services.Configure<NArk.Swaps.Boltz.Models.BoltzClientOptions>(o => o.ReferralId = "btcpay-arkade");
-
-            services.AddUIExtension("ln-payment-method-setup-tabhead", "/Views/Ark/ArkLNSetupTabhead.cshtml");
-
-            services.AddSingleton<ArkadeLNURLPayRequestFilter>();
-            services.AddSingleton<IPluginHookFilter>(sp => sp.GetRequiredService<ArkadeLNURLPayRequestFilter>());
-        }
-        else
-        {
-            // Null implementations for optional dependencies
-            services.AddSingleton<BoltzClient>(_ => null!);
-            services.AddSingleton<CachedBoltzClient>(_ => null!);
-            services.AddSingleton<SwapsManagementService>(_ => null!);
-            services.AddSingleton<BoltzLimitsValidator>(_ => null!);
-        }
+        // [Obsolete] upstream because nothing should create swaps any more; draining the ones that
+        // exist is what it is still for.
+#pragma warning disable CS0618
+        services.AddSingleton<ISweepPolicy, SwapSweepPolicy>();
+#pragma warning restore CS0618
+        services.AddSingleton<IContractTransformer, VHTLCContractTransformer>();
     }
 
     #endregion

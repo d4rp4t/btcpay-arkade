@@ -1,17 +1,5 @@
 @using BTCPayServer.Plugins.ArkPayServer
-@using BTCPayServer.Plugins.ArkPayServer.Lightning
-@inject ArkadeLightningLimitsService LimitsService
 @model BTCPayServer.Models.InvoicingModels.CheckoutModel
-
-@using NBitcoin
-@using System.Globalization
-@using System.Text.RegularExpressions
-@{
-    // Check if Lightning should be shown for this store and invoice amount
-    // The limits service handles all validation logic (store config, Boltz limits, etc.)
-    var amountSats = (long)Money.Coins(decimal.Parse(Regex.Replace(Model.Due, @"\s", ""), CultureInfo.InvariantCulture)).Satoshi;
-    var shouldShowLightning = await LimitsService.CanSupportLightningAsync(Model.StoreId, amountSats, CancellationToken.None);
-}
 
 <template id="@ArkadePlugin.CheckoutBodyComponentName">
     <div class="payment-box">
@@ -33,7 +21,7 @@
                 <label>{{ hasBoardingAddress ? 'Bitcoin Address (Boarding)' : 'Bitcoin Address' }}</label>
             </div>
         </div>
-        <div v-if="lightning && shouldShowLightning" class="input-group mt-3" data-testid="bolt11-invoice">
+        <div v-if="lightning" class="input-group mt-3" data-testid="bolt11-invoice">
             <div class="form-floating" id="Lightning_@Model.PaymentMethodId">
                 <vc:truncate-center text="lightning" is-vue="true" padding="15" elastic="true" classes="form-control-plaintext" />
                 <label v-t="'lightning'"></label>
@@ -65,7 +53,6 @@
                 nfcUrl: @Safe.Json(Url.ActionAbsolute(Context.Request, "SubmitLNURLWithdrawForInvoice", "NFC").ToString()),
                 nfcAmount: 0,
                 nfcSubmitting: false,
-                shouldShowLightning: @Safe.Json(shouldShowLightning),
                 hasBoardingAddress: @Safe.Json(Model.AdditionalData.ContainsKey("hasBoardingAddress") && (bool)Model.AdditionalData["hasBoardingAddress"])
             };
         },
@@ -82,7 +69,7 @@
             nfcDisplay () {
                 // Enable NFC for ARKADE payment method
                 const isArkade = this.model.paymentMethodId === 'ARKADE';
-                const hasLightning = !!this.lightning && this.shouldShowLightning;
+                const hasLightning = !!this.lightning;
                 return isArkade && hasLightning && (this.nfcSupported || this.nfcTestFallback);
             },
             nfcTestFallback () {

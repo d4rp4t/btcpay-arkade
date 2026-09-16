@@ -9,8 +9,6 @@ using Microsoft.AspNetCore.Mvc;
 using NArk.Abstractions.Intents;
 using NArk.Abstractions.VTXOs;
 using NArk.Hosting;
-using NArk.Swaps.Abstractions;
-using NArk.Swaps.Models;
 using NBitcoin;
 
 namespace BTCPayServer.Plugins.ArkPayServer.ViewComponents;
@@ -19,7 +17,6 @@ public class ArkActivityDashboardWidgetViewComponent(
     StoreRepository storeRepository,
     PaymentMethodHandlerDictionary handlerDictionary,
     IIntentStorage intentStorage,
-    ISwapStorage swapStorage,
     IVtxoStorage vtxoStorage,
     ArkNetworkConfig arkNetworkConfig) : ViewComponent
 {
@@ -46,13 +43,10 @@ public class ArkActivityDashboardWidgetViewComponent(
             var intentsTask = intentStorage.GetIntents(
                 walletIds: [walletId], take: 5, states: [ ArkIntentState.BatchInProgress, ArkIntentState.BatchSucceeded, ArkIntentState.WaitingForBatch, ArkIntentState.WaitingToSubmit], cancellationToken: ct);
 
-            var swapsTask = swapStorage.GetSwaps(
-                walletIds: [walletId], take: 5,  status: [ArkSwapStatus.Pending ,ArkSwapStatus.Settled],cancellationToken: ct);
-
             var vtxosTask = vtxoStorage.GetVtxos(
                 walletIds: [walletId], take: 5, cancellationToken: ct);
 
-            await Task.WhenAll(intentsTask, swapsTask, vtxosTask);
+            await Task.WhenAll(intentsTask, vtxosTask);
 
             var items = new List<ActivityItem>();
 
@@ -77,28 +71,6 @@ public class ArkActivityDashboardWidgetViewComponent(
                     Link =  !string.IsNullOrEmpty(intent.CommitmentTransactionId) ? ArkadeLinkHelper.GetCommitmentTransactionLink(arkNetworkConfig,intent.CommitmentTransactionId) : null,
                     StatusClass = statusClass,
                     StatusText = statusText
-                });
-            }
-
-            foreach (var swap in await swapsTask)
-            {
-                var (statusClass, statusText) = swap.Status switch
-                {
-                    ArkSwapStatus.Pending => ("text-bg-info", "Pending"),
-                    ArkSwapStatus.Settled => ("text-bg-success", "Settled"),
-                    ArkSwapStatus.Failed => ("text-bg-danger", "Failed"),
-                    _ => ("text-bg-warning", swap.Status.ToString())
-                };
-
-                items.Add(new ActivityItem
-                {
-                    Date = swap.CreatedAt,
-                    Type = ActivityItemType.Swap,
-                    Label = swap.SwapId,
-                    StatusClass = statusClass,
-                    StatusText = statusText,
-                    Link = ArkadeLinkHelper.GetSwapLink(arkNetworkConfig, swap.SwapId),
-                    Amount = $"{Money.Satoshis(swap.ExpectedAmount).ToDecimal(MoneyUnit.BTC)} BTC"
                 });
             }
 

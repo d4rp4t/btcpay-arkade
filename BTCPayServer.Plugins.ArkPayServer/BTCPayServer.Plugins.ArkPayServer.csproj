@@ -41,9 +41,6 @@
         <ProjectReference Include="..\submodules\NNark\NArk.Core\NArk.Core.csproj">
             <Private>true</Private>
         </ProjectReference>
-        <ProjectReference Include="..\submodules\NNark\NArk.Swaps\NArk.Swaps.csproj">
-            <Private>true</Private>
-        </ProjectReference>
         <ProjectReference Include="..\submodules\NNark\NArk.Storage.EfCore\NArk.Storage.EfCore.csproj">
             <Private>true</Private>
         </ProjectReference>

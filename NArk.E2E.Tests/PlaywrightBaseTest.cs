@@ -370,10 +370,10 @@ public abstract class PlaywrightBaseTest : UnitTestBase, IDisposable
                 if (outpoints.Count > 0) return outpoints;
             }
             // Transient "coins not ready yet" responses: a just-redeemed
-            // note VTXO is briefly absent ("No spendable coins") and, for
-            // the Lightning path specifically, briefly classified
-            // recoverable/swept ("No non-recoverable coins available")
-            // until it settles. Both clear on the next batch — keep polling.
+            // note VTXO is briefly absent ("No spendable coins"), and can be
+            // briefly classified recoverable/swept ("No non-recoverable coins
+            // available") until it settles. Both clear on the next batch —
+            // keep polling.
             catch (InvalidOperationException ex) when (
                 ex.Message.Contains("No spendable coins") ||
                 ex.Message.Contains("non-recoverable coins"))

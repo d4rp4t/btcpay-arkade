@@ -11,7 +11,6 @@ using BTCPayServer.Payments.Lightning;
 using BTCPayServer.PayoutProcessors;
 using BTCPayServer.Plugins.ArkPayServer.Data;
 using BTCPayServer.Plugins.ArkPayServer.Exceptions;
-using BTCPayServer.Plugins.ArkPayServer.Lightning;
 using BTCPayServer.Plugins.ArkPayServer.Models;
 using BTCPayServer.Plugins.ArkPayServer.Models.Api;
 using BTCPayServer.Plugins.ArkPayServer.PaymentHandler;
@@ -29,8 +28,6 @@ using Microsoft.Extensions.Logging;
 using NArk.Abstractions;
 using NArk.Abstractions.Fees;
 using NArk.Abstractions.Intents;
-using NArk.Swaps.Boltz;
-using NArk.Swaps.Boltz.Client;
 using NArk.Core.Contracts;
 using NArk.Hosting;
 using NArk.Core.Services;
@@ -39,9 +36,7 @@ using NArk.Abstractions.Blockchain;
 using NArk.Abstractions.Contracts;
 using NArk.Abstractions.Extensions;
 using NArk.Abstractions.VTXOs;
-using NArk.Swaps.Abstractions;
 using NArk.Abstractions.Wallets;
-using NArk.Swaps.Models;
 using NArk.Storage.EfCore.Entities;
 using NArk.Core.Wallet;
 using LNURL;
@@ -56,8 +51,6 @@ namespace BTCPayServer.Plugins.ArkPayServer.Controllers;
 [Route("plugins/ark")]
 [Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie)]
 public class ArkController(
-    BoltzLimitsValidator? boltzLimitsValidator,
-    BoltzClient? boltzClient,
     ArkNetworkConfig arkNetworkConfig,
     IAuthorizationService authorizationService,
     ArkPayoutHandler arkPayoutHandler,
@@ -80,10 +73,8 @@ public class ArkController(
     IBitcoinBlockchain bitcoinTimeChainProvider,
     VtxoSynchronizationService vtxoSyncService,
     IContractStorage contractStorage,
-    ISwapStorage swapStorage,
     IVtxoStorage vtxoStorage,
     IWalletStorage walletStorage,
-    ArkLightningSpendKeyService spendKeyService,
     IDbContextFactory<ArkPluginDbContext> dbContextFactory,
     IHttpClientFactory httpClientFactory,
     BoardingUtxoSyncService boardingUtxoSyncService,
@@ -178,8 +169,8 @@ public class ArkController(
 
             // On import, recover the wallet in the background (off the request thread —
             // a gap-limit scan polls arkd per index): discover contracts across derivation
-            // indices + server signers (incl. legacy/deprecated), restore swaps, finalize
-            // pending txs, resync funds, then sync boarding UTXOs.
+            // indices + server signers (incl. legacy/deprecated), finalize pending txs,
+            // resync funds, then sync boarding UTXOs.
             StartBackgroundRecovery(walletSettings.WalletId!);
 
             var config = new ArkadePaymentMethodConfig(walletSettings.WalletId!, walletSettings.IsOwnedByStore);
@@ -187,37 +178,6 @@ public class ArkController(
 
             // Set Arkade as the default payment method
             store.SetDefaultPaymentId(ArkadePlugin.ArkadePaymentMethodId);
-
-            // Enable Lightning by default if not already configured. Skip watch-only wallets:
-            // Arkade-backed Lightning needs batch participation (signing), and without a paired
-            // remote signer the wallet would accept LN invoices at checkout but fail at
-            // settlement after the customer has already committed to paying. The merchant can
-            // still flip it on manually once a companion signer is paired.
-            var lightningPaymentMethodId = GetLightningPaymentMethod();
-            var existingLnConfig = store.GetPaymentMethodConfig<LightningPaymentMethodConfig>(lightningPaymentMethodId, paymentMethodHandlerDictionary);
-            if (existingLnConfig == null && !walletSettings.IsWatchOnlyDescriptor)
-            {
-                var lnurlPaymentMethodId = PaymentTypes.LNURL.GetPaymentMethodId("BTC");
-                
-                var lnConfig = new LightningPaymentMethodConfig()
-                {
-                    ConnectionString = config.GeneratedByStore
-                        ? await spendKeyService.BuildConnectionStringAsync(config.WalletId)
-                        : ArkLightningSpendKeyService.BuildReceiveOnlyConnectionString(config.WalletId),
-                };
-
-                store.SetPaymentMethodConfig(paymentMethodHandlerDictionary[lightningPaymentMethodId], lnConfig);
-                store.SetPaymentMethodConfig(paymentMethodHandlerDictionary[lnurlPaymentMethodId], new LNURLPaymentMethodConfig
-                {
-                    UseBech32Scheme = true,
-                    LUD12Enabled = false
-                });
-                
-                var blob = store.GetStoreBlob();
-                blob.SetExcluded(lightningPaymentMethodId, false);
-                blob.OnChainWithLnInvoiceFallback = true;
-                store.SetStoreBlob(blob);
-            }
 
             await storeRepository.UpdateStore(store);
 
@@ -249,29 +209,21 @@ public class ArkController(
     /// Starts unified wallet recovery for <paramref name="walletId"/> on a background
     /// thread (a gap-limit scan polls arkd per index), tracking status for the overview.
     /// Discovers contracts (incl. legacy deprecated-signer scripts) + the derivation
-    /// index, restores swaps, finalizes pending txs and resyncs offchain funds, then
-    /// syncs boarding (on-chain) UTXOs. <c>IWalletRecoveryService</c> is only registered
-    /// when swaps (Boltz) are configured; without it this degrades to a boarding-only sync.
+    /// index, finalizes pending txs and resyncs offchain funds, then syncs boarding
+    /// (on-chain) UTXOs.
     /// </summary>
     private void StartBackgroundRecovery(string walletId)
     {
-        var recoveryService = serviceProvider.GetService<NArk.Swaps.Recovery.IWalletRecoveryService>();
+        var recoveryService = serviceProvider.GetRequiredService<NArk.Core.Recovery.IWalletRecoveryService>();
         _ = Task.Run(async () =>
         {
             try
             {
                 recoveryStatusTracker.SetRunning(walletId);
 
-                var contractsRecovered = 0;
-                var swapsAudited = 0;
-                var fundsSynced = 0;
-                if (recoveryService is not null)
-                {
-                    var report = await recoveryService.RecoverAsync(walletId, cancellationToken: CancellationToken.None);
-                    contractsRecovered = report.ContractsRecovered;
-                    swapsAudited = report.SwapAudit.Count;
-                    fundsSynced = report.FundsScriptsSynced;
-                }
+                var report = await recoveryService.RecoverAsync(walletId, cancellationToken: CancellationToken.None);
+                var contractsRecovered = report.ContractsRecovered;
+                var fundsSynced = report.FundsScriptsSynced;
 
                 // Boarding (on-chain) UTXOs aren't covered by offchain recovery.
                 var boardingContracts = (await contractStorage.GetContracts(
@@ -280,9 +232,7 @@ public class ArkController(
                 if (boardingContracts.Count > 0)
                     await boardingUtxoSyncService.SyncAsync(boardingContracts, CancellationToken.None);
 
-                recoveryStatusTracker.SetCompleted(walletId,
-                    recoveryService is not null ? contractsRecovered : boardingContracts.Count,
-                    swapsAudited, fundsSynced);
+                recoveryStatusTracker.SetCompleted(walletId, contractsRecovered, fundsSynced);
             }
             catch (Exception ex)
             {
@@ -304,7 +254,7 @@ public class ArkController(
 
         StartBackgroundRecovery(config.WalletId);
         return RedirectWithSuccess(nameof(StoreOverview),
-            "Wallet rescan started — contracts, funds and swaps will refresh shortly.", new { storeId });
+            "Wallet rescan started — contracts and funds will refresh shortly.", new { storeId });
     }
 
     [HttpGet("stores/{storeId}/overview")]
@@ -347,8 +297,6 @@ public class ArkController(
         var (arkOperatorConnected, arkOperatorError) = await CheckServiceConnectionAsync(
             ct => clientTransport.GetServerInfoAsync(ct), cancellationToken);
 
-        // Check Boltz connection and get cached limits
-        var (boltzConnected, boltzError, boltzLimits) = await GetBoltzConnectionStatusAsync(cancellationToken);
 
         // Determine if user can manage private keys (spend/view keys)
         // Allowed if: wallet was generated by this store OR user is server admin
@@ -404,23 +352,10 @@ public class ArkController(
             // Silently ignore - intents section will show empty
         }
 
-        // Get recent swaps (latest 5)
-        IReadOnlyCollection<NArk.Swaps.Models.ArkSwap> recentSwaps = [];
-        try
-        {
-            recentSwaps = await swapStorage.GetSwaps(
-                walletIds: [config.WalletId!], take: 5, status: [ArkSwapStatus.Pending , ArkSwapStatus.Settled], cancellationToken: cancellationToken);
-        }
-        catch (Exception)
-        {
-            // Silently ignore - swaps section will show empty
-        }
-
         return View(new StoreOverviewViewModel
         {
             StoreId = store!.Id,
             IsDestinationSweepEnabled = destination is not null,
-            IsLightningEnabled = IsArkadeLightningEnabled(),
             Balances = balances,
             WalletId = config.WalletId,
             Destination = destination,
@@ -429,7 +364,6 @@ public class ArkController(
             AllowSubDustAmounts = config.AllowSubDustAmounts,
             BoardingEnabled = config.BoardingEnabled,
             MinBoardingAmountSats = config.MinBoardingAmountSats,
-            ReverseSwapFeePayer = GetReverseSwapFeePayer(wallet),
             Wallet = wallet?.Secret,
             WalletType = wallet?.WalletType ?? WalletType.SingleKey,
             CanManagePrivateKeys = canManagePrivateKeys,
@@ -438,23 +372,11 @@ public class ArkController(
             ArkOperatorUrl = arkNetworkConfig.ArkUri,
             ArkOperatorConnected = arkOperatorConnected,
             ArkOperatorError = ArkOperatorAvailability.DescribeMessage(arkOperatorError),
-            BoltzUrl = arkNetworkConfig.BoltzUri,
-            BoltzConnected = boltzConnected,
-            BoltzError = boltzError,
-            BoltzReverseMinAmount = boltzLimits?.ReverseMinAmount,
-            BoltzReverseMaxAmount = boltzLimits?.ReverseMaxAmount,
-            BoltzReverseFeePercentage = boltzLimits?.ReverseFeePercentage,
-            BoltzReverseMinerFee = boltzLimits?.ReverseMinerFee,
-            BoltzSubmarineMinAmount = boltzLimits?.SubmarineMinAmount,
-            BoltzSubmarineMaxAmount = boltzLimits?.SubmarineMaxAmount,
-            BoltzSubmarineFeePercentage = boltzLimits?.SubmarineFeePercentage,
-            BoltzSubmarineMinerFee = boltzLimits?.SubmarineMinerFee,
             RecentVtxos = recentVtxos,
             SpendableOutpoints = spendableOutpoints,
             VtxoContracts = vtxoContracts,
             TotalVtxoCount = totalVtxoCount,
-            RecentIntents = recentIntents,
-            RecentSwaps = recentSwaps
+            RecentIntents = recentIntents
         });
     }
 
@@ -652,8 +574,7 @@ public class ArkController(
             StoreId = storeId,
             IsIntent = isIntent,
             VtxoOutpointsRaw = vtxoOutpointsRaw,
-            Balances = balances,
-            LightningAvailable = true // TODO: Check if Lightning is configured
+            Balances = balances
         };
 
         // Parse outpoints and load VTXO details
@@ -792,14 +713,9 @@ public class ArkController(
         // Get valid outputs (non-empty destinations)
         var validOutputs = model.Outputs.Where(o => !string.IsNullOrWhiteSpace(o.Destination)).ToList();
 
-        // Check for Lightning - only single output allowed
-        var lightningOutputs = validOutputs.Where(o =>
-            o.Destination.StartsWith("ln", StringComparison.OrdinalIgnoreCase) ||
-            o.Destination.StartsWith("lightning:", StringComparison.OrdinalIgnoreCase)).ToList();
-
-        if (lightningOutputs.Any() && validOutputs.Count > 1)
+        if (validOutputs.Any(o => IsLightningDestination(o.Destination)))
         {
-            model.Errors.Add("Lightning payments only support a single output.");
+            model.Errors.Add("Lightning destinations are not supported.");
             model.Balances = await GetArkBalances(config!.WalletId!, token);
             await ReloadSelectedVtxos(model, config.WalletId!, token);
             return View("IntentBuilder", model);
@@ -807,16 +723,6 @@ public class ArkController(
 
         try
         {
-            // If single Lightning output, use existing spend flow
-            if (lightningOutputs.Count == 1)
-            {
-                var lnDestination = lightningOutputs[0].Destination
-                    .Replace("lightning:", "", StringComparison.OrdinalIgnoreCase);
-                await arkadeSpendingService.Spend(store!, lnDestination, token);
-                TempData[WellKnownTempData.SuccessMessage] = "Lightning payment initiated successfully.";
-                return RedirectToAction(nameof(Vtxos), new { storeId });
-            }
-
             // Build ArkTxOut array from outputs
             var serverInfo = await clientTransport.GetServerInfoAsync(token);
             var arkOutputs = new List<ArkTxOut>();
@@ -930,38 +836,12 @@ public class ArkController(
             var serverInfo = await clientTransport.GetServerInfoAsync(token);
             var response = new FeeEstimateResponse();
 
-            // Check if this is a Lightning payment
-            if (request.Outputs.Count == 1)
+            if (request.Outputs.Count == 1 &&
+                IsLightningDestination(request.Outputs[0].Destination?.Trim() ?? ""))
             {
-                var dest = request.Outputs[0].Destination?.Trim() ?? "";
-                if (IsLightningDestination(dest))
-                {
-                    // Lightning swap fees
-                    if (boltzLimitsValidator != null)
-                    {
-                        var limits = await boltzLimitsValidator.GetAllLimitsAsync(token);
-                        if (limits != null)
-                        {
-                            var amount = request.Outputs[0].AmountSats ?? request.TotalInputSats;
-
-                            response.IsLightning = true;
-                            response.FeePercentage = limits.SubmarineFeePercentage * 100; // Convert to percentage for display
-                            response.MinerFeeSats = limits.SubmarineMinerFee;
-                            response.EstimatedFeeSats = (long)Math.Ceiling(amount * limits.SubmarineFeePercentage) + limits.SubmarineMinerFee;
-                            response.FeeDescription = $"{limits.SubmarineFeePercentage * 100:F2}% + {limits.SubmarineMinerFee} sats miner fee";
-                        }
-                        else
-                        {
-                            response.Error = "Failed to fetch Boltz limits";
-                        }
-                    }
-                    else
-                    {
-                        response.Error = "Lightning swaps not available";
-                    }
-
-                    return Json(response);
-                }
+                response.IsLightning = true;
+                response.Error = "Lightning destinations are not supported.";
+                return Json(response);
             }
 
             // Ark intent/transaction fees - need to get coins and build outputs
@@ -989,9 +869,7 @@ public class ArkController(
                 if (request.Outputs.Any(o => !string.IsNullOrWhiteSpace(o.Destination)))
                 {
                     var firstDest = request.Outputs.First(o => !string.IsNullOrWhiteSpace(o.Destination)).Destination!.Trim();
-                    if (IsLightningDestination(firstDest))
-                        destType = DestinationType.LightningInvoice;
-                    else if (firstDest.StartsWith("bc1", StringComparison.OrdinalIgnoreCase)
+                    if (firstDest.StartsWith("bc1", StringComparison.OrdinalIgnoreCase)
                           || firstDest.StartsWith("tb1", StringComparison.OrdinalIgnoreCase)
                           || firstDest.StartsWith("bcrt1", StringComparison.OrdinalIgnoreCase)
                           || firstDest.StartsWith("1") || firstDest.StartsWith("3"))
@@ -1008,11 +886,7 @@ public class ArkController(
                 var recoverable = availableCoins.Where(c => c.Swept).ToList();
                 SuggestCoinsResponse suggestion;
 
-                if (destType == DestinationType.LightningInvoice)
-                {
-                    suggestion = SelectCoins(nonRecoverable.Any() ? nonRecoverable : availableCoins, targetSats, SpendType.Swap);
-                }
-                else if (destType == DestinationType.BitcoinAddress)
+                if (destType == DestinationType.BitcoinAddress)
                 {
                     suggestion = SelectCoins(availableCoins, targetSats, SpendType.Batch);
                 }
@@ -1204,21 +1078,15 @@ public class ArkController(
 
             var response = new SuggestCoinsResponse();
 
-            // Lightning requires non-recoverable coins only
             if (request.DestinationType == DestinationType.LightningInvoice)
             {
-                if (!nonRecoverable.Any())
+                return Json(new SuggestCoinsResponse
                 {
-                    return Json(new SuggestCoinsResponse
-                    {
-                        Error = "Lightning requires non-recoverable coins. No non-recoverable coins available."
-                    });
-                }
-
-                response = SelectCoins(nonRecoverable, request.AmountSats, SpendType.Swap);
+                    Error = "Lightning destinations are not supported."
+                });
             }
             // Ark address: prefer offchain (non-recoverable), fallback to batch (recoverable)
-            else if (request.DestinationType == DestinationType.ArkAddress)
+            if (request.DestinationType == DestinationType.ArkAddress)
             {
                 // Try offchain first with non-recoverable
                 if (nonRecoverable.Any())
@@ -1359,15 +1227,7 @@ public class ArkController(
         // Cross-validation rules
         if (hasLightning)
         {
-            if (request.Outputs.Count > 1)
-            {
-                response.Errors.Add("Lightning supports single output only");
-            }
-            if (hasRecoverableCoins)
-            {
-                response.Errors.Add("Lightning requires non-recoverable coins");
-            }
-            response.SpendType = SpendType.Swap;
+            response.Errors.Add("Lightning destinations are not supported.");
         }
         else if (response.OutputResults.Any(r => r.DetectedType == DestinationType.BitcoinAddress))
         {
@@ -1695,65 +1555,14 @@ public class ArkController(
             }
         }
 
-        // Get server info for network (needed for Lightning and destination parsing)
+        // Get server info for network (needed for destination parsing)
         var serverInfo = await clientTransport.GetServerInfoAsync(token);
 
-        // Check for Lightning (BOLT11, LNURL, or Lightning Address)
-        var isLightning = validOutputs.Any(o => IsLightningDestination(o.Destination));
-
-        if (isLightning)
+        // Recognised only to refuse them by name rather than as unreadable addresses.
+        if (validOutputs.Any(o => IsLightningDestination(o.Destination)))
         {
-            if (validOutputs.Count > 1)
-            {
-                model.Errors.Add("Lightning supports single output only");
-                return View("Send", model);
-            }
-
-            if (selectedCoins.Any(c => c.Swept))
-            {
-                model.Errors.Add("Lightning requires non-recoverable coins");
-                return View("Send", model);
-            }
-
-            // Execute Lightning payment
-            try
-            {
-                var lnOutput = validOutputs[0];
-                var lnDestination = lnOutput.Destination;
-
-                // Resolve LNURL/Lightning Address to BOLT11 at submit time
-                if (lnDestination.IsValidEmail() ||
-                    lnDestination.StartsWith("lnurl", StringComparison.OrdinalIgnoreCase))
-                {
-                    var amount = lnOutput.AmountSats ?? model.TotalSelectedSats;
-                    var (bolt11, lnurlError) = await ResolveLnurlToInvoiceAsync(
-                        lnDestination, amount, serverInfo.Network, token);
-                    if (lnurlError != null)
-                    {
-                        model.Errors.Add($"LNURL resolution failed: {lnurlError}");
-                        return View("Send", model);
-                    }
-                    lnDestination = bolt11!;
-                }
-                else
-                {
-                    lnDestination = lnDestination
-                        .Replace("lightning:", "", StringComparison.OrdinalIgnoreCase);
-                }
-
-                await arkadeSpendingService.Spend(store!, lnDestination, token);
-
-                // Mark payout as paid if this fulfills a payout
-                if (!string.IsNullOrEmpty(lnOutput.PayoutId))
-                    await MarkPayoutPaid(lnOutput.PayoutId, null, token);
-
-                return RedirectWithSuccess(nameof(StoreOverview), "Lightning payment sent!", new { storeId });
-            }
-            catch (Exception ex)
-            {
-                model.Errors.Add($"Lightning payment failed: {ex.Message}");
-                return View("Send", model);
-            }
+            model.Errors.Add("Lightning destinations are not supported.");
+            return View("Send", model);
         }
 
         // Parse all destinations and build ArkTxOut array
@@ -1994,22 +1803,6 @@ public class ArkController(
             return RedirectWithSuccess(nameof(StoreOverview), "Boarding disabled.", new { storeId });
         }
 
-        if (command == "toggle-fee-payer")
-        {
-            var currentWallet = await walletStorage.GetWalletById(config!.WalletId!, cancellationToken);
-            var newFeePayer = GetReverseSwapFeePayer(currentWallet) == ReverseSwapFeePayer.Recipient
-                ? ReverseSwapFeePayer.Sender
-                : ReverseSwapFeePayer.Recipient;
-            await walletStorage.SetMetadataValue(
-                config.WalletId!, ArkLightningClient.ReverseSwapFeePayerMetadataKey, newFeePayer.ToString(), cancellationToken);
-
-            return RedirectWithSuccess(nameof(StoreOverview),
-                newFeePayer == ReverseSwapFeePayer.Sender
-                    ? "Reverse-swap fee now paid by the sender — invoices will exceed the requested amount and may be rejected by LNURL/checkout wallets."
-                    : "Reverse-swap fee now paid by the recipient — invoices match the requested amount (LUD-06-safe).",
-                new { storeId });
-        }
-
         return RedirectToAction(nameof(StoreOverview), new { storeId });
     }
 
@@ -2091,20 +1884,6 @@ public class ArkController(
                 .ToDictionary(g => g.Key, g => g.ToArray());
         }
 
-        // Always load swaps
-        var contractSwaps = new Dictionary<string, NArk.Swaps.Models.ArkSwap[]>();
-        if (contracts.Any())
-        {
-            var contractScripts = contracts.Select(c => c.Script).ToArray();
-            var swaps = await swapStorage.GetSwaps(
-                walletIds: [config.WalletId!],
-                contractScripts: contractScripts,
-                cancellationToken: HttpContext.RequestAborted);
-            contractSwaps = swaps
-                .GroupBy(s => s.ContractScript)
-                .ToDictionary(g => g.Key, g => g.ToArray());
-        }
-
         var model = new StoreContractsViewModel
         {
             StoreId = storeId,
@@ -2114,130 +1893,14 @@ public class ArkController(
             SearchText = searchText,
             Search = new SearchString(searchTerm),
             ContractVtxos = contractVtxos,
-            ContractSwaps = contractSwaps,
             CanManageContracts = config.GeneratedByStore,
             Debug = debug,
-            CachedSwapScripts = [], // Active swap scripts tracked by SwapsManagementService internally
             CachedContractScripts = (await contractStorage.GetContracts(walletIds: [config.WalletId], isActive: true, cancellationToken: HttpContext.RequestAborted))
                 .Select(c => c.Script).ToHashSet(),
             ListenedScripts = debug ? vtxoSyncService.ListenedScripts.ToHashSet() : []
         };
 
         return View(model);
-    }
-
-    [HttpGet("stores/{storeId}/swaps")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> Swaps(
-        string storeId,
-        string? searchTerm = null,
-        string? searchText = null,
-        int skip = 0,
-        int count = 50,
-        bool debug = false)
-    {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
-        if (errorResult != null) return errorResult;
-
-        if (!config!.GeneratedByStore)
-            return View(new StoreSwapsViewModel { StoreId = storeId });
-
-        // Get status filter using helper
-        var statusFilter = ParseEnumFilter<ArkSwapStatus>(searchTerm, "status", s => s switch
-        {
-            "pending" => ArkSwapStatus.Pending,
-            "settled" => ArkSwapStatus.Settled,
-            "failed" => ArkSwapStatus.Failed,
-            _ => null
-        });
-
-        // Get type filter using helper
-        var typeFilter = ParseEnumFilter<ArkSwapType>(searchTerm, "type", t => t switch
-        {
-            "reverse" => ArkSwapType.ReverseSubmarine,
-            "submarine" => ArkSwapType.Submarine,
-            _ => null
-        });
-
-        var swaps = await swapStorage.GetSwaps(
-            walletIds: [config.WalletId!],
-            status: statusFilter != null ? [statusFilter.Value] : null,
-            swapTypes: typeFilter != null ? [typeFilter.Value] : null,
-            searchText: searchText,
-            skip: skip,
-            take: count,
-            cancellationToken: HttpContext.RequestAborted);
-
-        // Get contracts for the swaps to display contract details
-        var swapContractScripts = swaps.Select(s => s.ContractScript).Distinct().ToArray();
-        var swapContracts = await contractStorage.GetContracts(
-            walletIds: [config.WalletId!],
-            scripts: swapContractScripts,
-            cancellationToken: HttpContext.RequestAborted);
-
-        var model = new StoreSwapsViewModel
-        {
-            StoreId = storeId,
-            Swaps = swaps,
-            SwapContracts = swapContracts.ToDictionary(c => c.Script),
-            Skip = skip,
-            Count = count,
-            SearchText = searchText,
-            Search = new SearchString(searchTerm),
-            Debug = debug,
-            CachedSwapIds = []
-        };
-
-        return View(model);
-    }
-
-    [HttpPost("stores/{storeId}/swaps/{swapId}/poll")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> PollSwap(string storeId, string swapId)
-    {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
-        if (errorResult != null) return errorResult;
-
-        try
-        {
-            if (boltzClient == null)
-                return RedirectWithError(nameof(Swaps), "Boltz client is not configured", new { storeId });
-
-            var swaps = await swapStorage.GetSwaps(
-                walletIds: [config!.WalletId!],
-                swapIds: [swapId],
-                cancellationToken: HttpContext.RequestAborted);
-            var swap = swaps.FirstOrDefault();
-            if (swap == null)
-                return RedirectWithError(nameof(Swaps), $"Swap {swapId} not found.", new { storeId });
-
-            var statusResponse = await boltzClient.GetSwapStatusAsync(swapId, HttpContext.RequestAborted);
-            var newStatus = MapBoltzStatus(statusResponse.Status);
-
-            if (swap.Status != newStatus)
-            {
-                await swapStorage.UpdateSwapStatus(config.WalletId!, swapId, newStatus, cancellationToken: HttpContext.RequestAborted);
-                return RedirectWithSuccess(nameof(Swaps), $"Swap {swapId} polled successfully. Status updated to: {newStatus}", new { storeId });
-            }
-
-            return RedirectWithSuccess(nameof(Swaps), $"Swap {swapId} polled successfully. No status change (current: {swap.Status}).", new { storeId });
-        }
-        catch (Exception ex)
-        {
-            return RedirectWithError(nameof(Swaps), $"Error polling swap: {ex.Message}", new { storeId });
-        }
-    }
-
-    private static ArkSwapStatus MapBoltzStatus(string status)
-    {
-        return status switch
-        {
-            "swap.created" or "invoice.set" => ArkSwapStatus.Pending,
-            "invoice.failedToPay" or "invoice.expired" or "swap.expired" or "transaction.failed" or "transaction.refunded" => ArkSwapStatus.Failed,
-            "transaction.mempool" => ArkSwapStatus.Pending,
-            "transaction.confirmed" or "invoice.settled" or "transaction.claimed" => ArkSwapStatus.Settled,
-            _ => ArkSwapStatus.Unknown
-        };
     }
 
     [HttpGet("stores/{storeId}/vtxos")]
@@ -2437,100 +2100,6 @@ public class ArkController(
         });
     }
 
-    [HttpGet("stores/{storeId}/enable-ln")]
-    [HttpPost("stores/{storeId}/enable-ln")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> EnableLightning(string storeId)
-    {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
-        if (errorResult != null) return errorResult;
-
-        var lightningPaymentMethodId = GetLightningPaymentMethod();
-        var lnurlPaymentMethodId = PaymentTypes.LNURL.GetPaymentMethodId("BTC");
-
-        store!.SetPaymentMethodConfig(paymentMethodHandlerDictionary[lightningPaymentMethodId], new LightningPaymentMethodConfig
-        {
-            ConnectionString = config!.GeneratedByStore
-                ? await spendKeyService.BuildConnectionStringAsync(config.WalletId)
-                : ArkLightningSpendKeyService.BuildReceiveOnlyConnectionString(config.WalletId),
-        });
-        store.SetPaymentMethodConfig(paymentMethodHandlerDictionary[lnurlPaymentMethodId], new LNURLPaymentMethodConfig
-        {
-            UseBech32Scheme = true,
-            LUD12Enabled = false
-        });
-
-        var blob = store.GetStoreBlob();
-        blob.SetExcluded(lightningPaymentMethodId, false);
-        blob.OnChainWithLnInvoiceFallback = true;
-        store.SetStoreBlob(blob);
-        await storeRepository.UpdateStore(store);
-        return RedirectWithSuccess(nameof(StoreOverview), "Lightning enabled", new { storeId });
-    }
-
-    /// <summary>
-    /// Returns the wallet's Lightning connection string, including its spend capability, so
-    /// the owner can add the same wallet to another store they control.
-    ///
-    /// Gated on <c>requireOwnedByStore</c>: only a store with spend rights over the wallet
-    /// may read the capability.
-    /// </summary>
-    [HttpGet("stores/{storeId}/ln-connection-string")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> LightningConnectionString(string storeId)
-    {
-        var (_, config, errorResult) = await ValidateStoreAndConfig(requireOwnedByStore: true);
-        if (errorResult != null) return errorResult;
-
-        return Ok(new
-        {
-            connectionString = await spendKeyService.BuildConnectionStringAsync(
-                config!.WalletId, HttpContext.RequestAborted)
-        });
-    }
-
-    /// <summary>
-    /// Issues a fresh spend capability for the wallet. Connection strings previously shared
-    /// with other stores stop authorising spends and must be re-copied.
-    /// </summary>
-    [HttpPost("stores/{storeId}/regenerate-ln-spend-key")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> RegenerateLightningSpendKey(string storeId)
-    {
-        var (store, config, errorResult) = await ValidateStoreAndConfig(requireOwnedByStore: true);
-        if (errorResult != null) return errorResult;
-
-        await spendKeyService.RegenerateAsync(config!.WalletId, HttpContext.RequestAborted);
-
-        // Re-issue this store's own connection string so it keeps working with the new value.
-        var lightningPaymentMethodId = GetLightningPaymentMethod();
-        var lnConfig = store!.GetPaymentMethodConfig<LightningPaymentMethodConfig>(
-            lightningPaymentMethodId, paymentMethodHandlerDictionary);
-        if (lnConfig?.ConnectionString?.StartsWith("type=arkade", StringComparison.InvariantCultureIgnoreCase) is true)
-        {
-            lnConfig.ConnectionString = await spendKeyService.BuildConnectionStringAsync(
-                config.WalletId, HttpContext.RequestAborted);
-            store.SetPaymentMethodConfig(paymentMethodHandlerDictionary[lightningPaymentMethodId], lnConfig);
-            await storeRepository.UpdateStore(store);
-        }
-
-        return RedirectWithSuccess(nameof(StoreOverview),
-            "Spend key regenerated. Connection strings shared with other stores must be updated.",
-            new { storeId });
-    }
-
-    [HttpPost("stores/{storeId}/disable-ln")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> DisableLightning(string storeId)
-    {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
-        if (errorResult != null) return errorResult;
-
-        store!.SetPaymentMethodConfig(GetLightningPaymentMethod(), null);
-        await storeRepository.UpdateStore(store);
-        return RedirectWithSuccess(nameof(StoreOverview), "Lightning disabled", new { storeId });
-    }
-
     [HttpPost("stores/{storeId}/clear-wallet")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> ClearWallet(string storeId)
@@ -2724,12 +2293,7 @@ public class ArkController(
             if (!contracts.Any())
                 return RedirectWithError(nameof(Contracts), "Contract not found.", new { storeId });
 
-            // Check if contract has any pending swaps
-            var swaps = await swapStorage.GetSwaps(walletIds: [config.WalletId!], contractScripts: [script], status: [ArkSwapStatus.Pending], cancellationToken: cancellationToken);
-            if (swaps.Any())
-                return RedirectWithError(nameof(Contracts), "Cannot delete contract: It has pending swaps.", new { storeId });
-
-            // Delete the contract (cascade will delete related swaps)
+            // Delete the contract
             await contractStorage.DeleteContract(config.WalletId, script, cancellationToken);
             return RedirectWithSuccess(nameof(Contracts), "Contract deleted successfully.", new { storeId });
         }
@@ -2784,16 +2348,6 @@ public class ArkController(
         {
             return RedirectWithError(nameof(Contracts), $"Failed to import contract: {ex.Message}", new { storeId });
         }
-    }
-
-    private bool IsArkadeLightningEnabled()
-    {
-        var store = HttpContext.GetStoreData();
-        var lnConfig =
-            store.GetPaymentMethodConfig<LightningPaymentMethodConfig>(GetLightningPaymentMethod(), paymentMethodHandlerDictionary);
-        var lnEnabled =
-            lnConfig?.ConnectionString?.StartsWith("type=arkade", StringComparison.InvariantCultureIgnoreCase) is true;
-        return lnEnabled;
     }
 
     private async Task<TemporaryWalletSettings> GetFromInputWallet(string? wallet, WalletSetupMode mode = WalletSetupMode.Auto)
@@ -2870,8 +2424,6 @@ public class ArkController(
         var mnemonic = new Mnemonic(Wordlist.English, WordCount.Twelve);
         return mnemonic.ToString();
     }
-
-    private static PaymentMethodId GetLightningPaymentMethod() => PaymentTypes.LN.GetPaymentMethodId("BTC");
 
     private T? GetConfig<T>(PaymentMethodId paymentMethodId, StoreData store) where T : class
     {
@@ -3054,18 +2606,12 @@ public class ArkController(
         var (arkOperatorConnected, arkOperatorError) = await CheckServiceConnectionAsync(
             ct => clientTransport.GetServerInfoAsync(ct), cancellationToken);
 
-        // Check Boltz connection using helper
-        var (boltzConnected, boltzError) = boltzClient != null
-            ? await CheckServiceConnectionAsync(ct => boltzClient.GetVersionAsync(), cancellationToken)
-            : (false, null);
-
         ViewData["IsAdminView"] = true;
         ViewData["WalletId"] = walletId;
 
         return View("StoreOverview", new StoreOverviewViewModel
         {
             IsDestinationSweepEnabled = destination is not null,
-            IsLightningEnabled = false, // Admin view doesn't check Lightning
             Balances = balances,
             WalletId = walletId,
             Destination = destination,
@@ -3074,10 +2620,7 @@ public class ArkController(
             DefaultAddress = defaultAddress,
             ArkOperatorUrl = arkNetworkConfig.ArkUri,
             ArkOperatorConnected = arkOperatorConnected,
-            ArkOperatorError = ArkOperatorAvailability.DescribeMessage(arkOperatorError),
-            BoltzUrl = arkNetworkConfig.BoltzUri,
-            BoltzConnected = boltzConnected,
-            BoltzError = boltzError
+            ArkOperatorError = ArkOperatorAvailability.DescribeMessage(arkOperatorError)
         });
     }
 
@@ -3103,11 +2646,6 @@ public class ArkController(
             if (wallet == null)
                 return RedirectWithError(nameof(ListWallets), "Wallet not found.");
 
-            // Check if wallet has any pending swaps
-            var hasPendingSwaps = await HasPendingSwapsAsync(walletId, cancellationToken);
-            if (hasPendingSwaps)
-                return RedirectWithError(nameof(AdminWalletOverview), "Cannot delete wallet: It has pending swaps.", new { walletId });
-
             // Check if wallet has any pending intents
             var hasPendingIntents = await HasPendingIntentsAsync(walletId, cancellationToken);
             if (hasPendingIntents)
@@ -3126,14 +2664,10 @@ public class ArkController(
     #region Helper Methods
 
     /// <summary>
-    /// Reads the wallet-level Boltz reverse-swap fee payer setting, defaulting to Recipient
-    /// (LUD-06-safe) when unset.
+    /// Only used to recognise and clear the stale <c>type=arkade</c> connection string a store
+    /// configured against the old Arkade Lightning backend still carries.
     /// </summary>
-    private static ReverseSwapFeePayer GetReverseSwapFeePayer(ArkWalletInfo? wallet) =>
-        wallet?.Metadata?.TryGetValue(ArkLightningClient.ReverseSwapFeePayerMetadataKey, out var raw) is true
-            && Enum.TryParse<ReverseSwapFeePayer>(raw, out var feePayer)
-            ? feePayer
-            : ReverseSwapFeePayer.Recipient;
+    private static PaymentMethodId GetLightningPaymentMethod() => PaymentTypes.LN.GetPaymentMethodId("BTC");
 
     /// <summary>
     /// Checks whether the given wallet ID is referenced by any store's Ark or LN payment method config.
@@ -3257,26 +2791,6 @@ public class ArkController(
         return filters.Length == 1 ? filters[0] == trueValue : null;
     }
 
-    /// <summary>
-    /// Gets Boltz connection status and cached limits.
-    /// </summary>
-    private async Task<(bool connected, string? error, BoltzAllLimits? limits)> GetBoltzConnectionStatusAsync(
-        CancellationToken cancellationToken)
-    {
-        if (boltzLimitsValidator == null)
-            return (false, null, null);
-
-        try
-        {
-            var limits = await boltzLimitsValidator.GetAllLimitsAsync(cancellationToken);
-            return (limits != null, limits == null ? "Boltz instance does not support Arkade" : null, limits);
-        }
-        catch (Exception ex)
-        {
-            return (false, ex.Message, null);
-        }
-    }
-
     #endregion
 
     #region Mass Actions
@@ -3326,58 +2840,6 @@ public class ArkController(
         catch (Exception ex)
         {
             return RedirectWithError(nameof(Vtxos), $"Mass action failed: {ex.Message}", new { storeId });
-        }
-    }
-
-    [HttpPost("stores/{storeId}/swaps/mass-action")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> MassActionSwaps(string storeId, string command, string[] selectedItems, CancellationToken cancellationToken)
-    {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
-        if (errorResult != null) return errorResult;
-
-        if (selectedItems.Length == 0)
-            return RedirectWithError(nameof(Swaps), "No items selected.", new { storeId });
-
-        try
-        {
-            switch (command)
-            {
-                case "poll-status":
-                    if (boltzClient == null)
-                        return RedirectWithError(nameof(Swaps), "Boltz client is not configured.", new { storeId });
-
-                    var updatedCount = 0;
-                    // Batch fetch all swaps at once for efficiency
-                    var swapsToCheck = await swapStorage.GetSwaps(
-                        walletIds: [config!.WalletId!],
-                        swapIds: selectedItems,
-                        cancellationToken: cancellationToken);
-                    var swapsDict = swapsToCheck.ToDictionary(s => s.SwapId);
-
-                    foreach (var swapId in selectedItems)
-                    {
-                        if (!swapsDict.TryGetValue(swapId, out var swap))
-                            continue;
-
-                        var statusResponse = await boltzClient.GetSwapStatusAsync(swapId, cancellationToken);
-                        var newStatus = MapBoltzStatus(statusResponse.Status);
-
-                        if (swap.Status != newStatus)
-                        {
-                            await swapStorage.UpdateSwapStatus(config.WalletId!, swapId, newStatus, cancellationToken: cancellationToken);
-                            updatedCount++;
-                        }
-                    }
-                    return RedirectWithSuccess(nameof(Swaps), $"Polled {selectedItems.Length} swaps. {updatedCount} status updates.", new { storeId });
-
-                default:
-                    return RedirectWithError(nameof(Swaps), $"Unknown command: {command}", new { storeId });
-            }
-        }
-        catch (Exception ex)
-        {
-            return RedirectWithError(nameof(Swaps), $"Mass action failed: {ex.Message}", new { storeId });
         }
     }
 
@@ -3456,58 +2918,6 @@ public class ArkController(
                 case "build-intent":
                     // Redirect to spend/intent builder with selected VTXOs
                     return RedirectToAction(nameof(SpendOverview), new { storeId, vtxoOutpoints = string.Join(",", selectedItems) });
-
-                default:
-                    return RedirectWithError(nameof(Contracts), $"Unknown command: {command}", new { storeId });
-            }
-        }
-        catch (Exception ex)
-        {
-            return RedirectWithError(nameof(Contracts), $"Mass action failed: {ex.Message}", new { storeId });
-        }
-    }
-
-    [HttpPost("stores/{storeId}/contracts/swaps-sublist/mass-action")]
-    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
-    public async Task<IActionResult> MassActionSwapsSublist(string storeId, string contractScript, string command, string[] selectedItems, CancellationToken cancellationToken)
-    {
-        var (store, config, errorResult) = await ValidateStoreAndConfig();
-        if (errorResult != null) return errorResult;
-
-        if (selectedItems.Length == 0)
-            return RedirectWithError(nameof(Contracts), "No items selected.", new { storeId });
-
-        try
-        {
-            switch (command)
-            {
-                case "poll-status":
-                    if (boltzClient == null)
-                        return RedirectWithError(nameof(Contracts), "Boltz client is not configured.", new { storeId });
-
-                    var updatedSwapCount = 0;
-                    // Batch fetch all swaps at once for efficiency
-                    var swapsForContracts = await swapStorage.GetSwaps(
-                        walletIds: [config!.WalletId!],
-                        swapIds: selectedItems,
-                        cancellationToken: cancellationToken);
-                    var contractSwapsDict = swapsForContracts.ToDictionary(s => s.SwapId);
-
-                    foreach (var swapId in selectedItems)
-                    {
-                        if (!contractSwapsDict.TryGetValue(swapId, out var swap))
-                            continue;
-
-                        var statusResponse = await boltzClient.GetSwapStatusAsync(swapId, cancellationToken);
-                        var newStatus = MapBoltzStatus(statusResponse.Status);
-
-                        if (swap.Status != newStatus)
-                        {
-                            await swapStorage.UpdateSwapStatus(config.WalletId!, swapId, newStatus, cancellationToken: cancellationToken);
-                            updatedSwapCount++;
-                        }
-                    }
-                    return RedirectWithSuccess(nameof(Contracts), $"Polled {selectedItems.Length} swaps. {updatedSwapCount} status updates.", new { storeId });
 
                 default:
                     return RedirectWithError(nameof(Contracts), $"Unknown command: {command}", new { storeId });
@@ -3845,22 +3255,6 @@ public class ArkController(
         return (info, null);
     }
 
-    private async Task<(string? bolt11, string? error)> ResolveLnurlToInvoiceAsync(
-        string destination, long amountSats, Network network, CancellationToken token)
-    {
-        var (info, error) = await ResolveLnurlAsync(destination, token);
-        if (info == null) return (null, error ?? "LNURL resolution failed");
-
-        var lm = new LightMoney(amountSats, LightMoneyUnit.Satoshi);
-        if (lm < info.MinSendable || lm > info.MaxSendable)
-            return (null, $"Amount {amountSats} sats outside LNURL range ({info.MinSendable.ToUnit(LightMoneyUnit.Satoshi)}-{info.MaxSendable.ToUnit(LightMoneyUnit.Satoshi)} sats)");
-
-        var httpClient = httpClientFactory.CreateClient();
-        var callback = await info.SendRequest(lm, network, httpClient, cancellationToken: token);
-        var bolt11 = callback.GetPaymentRequest(network);
-        return (bolt11.ToString(), null);
-    }
-
     private async Task<Send2DestinationViewModel> ParseSend2DestinationAsync(
         string rawDestination, decimal? amountBtc, Network network, CancellationToken token)
     {
@@ -3883,17 +3277,6 @@ public class ArkController(
                 result.ResolvedAddress = rawDestination;
                 result.LnurlMinSats = (long)info.MinSendable.ToUnit(LightMoneyUnit.Satoshi);
                 result.LnurlMaxSats = (long)info.MaxSendable.ToUnit(LightMoneyUnit.Satoshi);
-
-                // Intersect with Boltz submarine swap limits
-                if (boltzLimitsValidator != null)
-                {
-                    var limits = await boltzLimitsValidator.GetAllLimitsAsync(token);
-                    if (limits != null)
-                    {
-                        result.LnurlMinSats = Math.Max(result.LnurlMinSats, limits.SubmarineMinAmount);
-                        result.LnurlMaxSats = Math.Min(result.LnurlMaxSats, limits.SubmarineMaxAmount);
-                    }
-                }
 
                 var amountSats = amountBtc.HasValue ? (long)(amountBtc.Value * 100_000_000m) : 0L;
                 result.AmountSats = amountSats;
@@ -3960,18 +3343,7 @@ public class ArkController(
                 }
                 else if (dest.Type is Send2DestinationType.LightningInvoice or Send2DestinationType.Bip21Lightning or Send2DestinationType.Lnurl)
                 {
-                    // Lightning swap fee estimation via Boltz
-                    if (boltzLimitsValidator != null)
-                    {
-                        var limits = await boltzLimitsValidator.GetAllLimitsAsync(token);
-                        if (limits != null)
-                        {
-                            var percentFee = (long)(dest.AmountSats * limits.SubmarineFeePercentage / 100m);
-                            var minerFee = limits.SubmarineMinerFee;
-                            dest.FeeSats = percentFee + minerFee;
-                            dest.FeeDescription = $"Swap fee ({limits.SubmarineFeePercentage:0.##}% + {minerFee:#,0} sat miner)";
-                        }
-                    }
+                    dest.FeeDescription = "Lightning destinations are not supported";
                 }
             }
             catch
@@ -4115,39 +3487,25 @@ public class ArkController(
     #region BTCPay-specific wallet storage helpers
 
     /// <summary>
-    /// BTCPay-specific helper to get all wallets with their related contracts and swaps.
+    /// BTCPay-specific helper to get all wallets with their related contracts.
     /// </summary>
     private async Task<List<ArkWalletEntity>> GetWalletsWithDetailsAsync(CancellationToken cancellationToken = default)
     {
         await using var ctx = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         return await ctx.Wallets
             .Include(w => w.Contracts)
-            .Include(w => w.Swaps)
             .ToListAsync(cancellationToken);
     }
 
     /// <summary>
-    /// BTCPay-specific helper to get a wallet with its related contracts and swaps.
+    /// BTCPay-specific helper to get a wallet with its related contracts.
     /// </summary>
     private async Task<ArkWalletEntity?> GetWalletWithDetailsAsync(string walletId, CancellationToken cancellationToken = default)
     {
         await using var ctx = await dbContextFactory.CreateDbContextAsync(cancellationToken);
         return await ctx.Wallets
             .Include(w => w.Contracts)
-            .Include(w => w.Swaps)
             .FirstOrDefaultAsync(w => w.Id == walletId, cancellationToken);
-    }
-
-    /// <summary>
-    /// BTCPay-specific helper to check if a wallet has pending swaps.
-    /// </summary>
-    private async Task<bool> HasPendingSwapsAsync(string walletId, CancellationToken cancellationToken = default)
-    {
-        await using var ctx = await dbContextFactory.CreateDbContextAsync(cancellationToken);
-        return await ctx.Swaps
-            .AnyAsync(s => s.WalletId == walletId &&
-                          s.Status == ArkSwapStatus.Pending,
-                     cancellationToken);
     }
 
     /// <summary>

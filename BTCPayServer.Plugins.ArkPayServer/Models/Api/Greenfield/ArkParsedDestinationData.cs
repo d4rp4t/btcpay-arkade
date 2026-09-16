@@ -54,13 +54,13 @@ public class ArkParsedDestinationData
 
     /// <summary>
     /// Minimum sendable amount (in sats) advertised by an LNURL endpoint, intersected with
-    /// Boltz submarine swap limits when available.
+    /// As advertised by the LNURL-pay endpoint.
     /// </summary>
     public long LnurlMinSats { get; set; }
 
     /// <summary>
     /// Maximum sendable amount (in sats) advertised by an LNURL endpoint, intersected with
-    /// Boltz submarine swap limits when available.
+    /// As advertised by the LNURL-pay endpoint.
     /// </summary>
     public long LnurlMaxSats { get; set; }
 

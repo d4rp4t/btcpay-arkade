@@ -1,5 +1,4 @@
 using BTCPayServer.Payments;
-using BTCPayServer.Plugins.ArkPayServer.Lightning;
 using BTCPayServer.Services.Invoices;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
@@ -7,18 +6,9 @@ using NBitcoin;
 
 namespace BTCPayServer.Plugins.ArkPayServer.PaymentHandler;
 
-public class ArkadePaymentLinkExtension : IPaymentLinkExtension
+public class ArkadePaymentLinkExtension(IServiceProvider serviceProvider) : IPaymentLinkExtension
 {
-    private readonly IServiceProvider _serviceProvider;
-    private readonly ArkadeLightningLimitsService _limitsService;
-
-    public ArkadePaymentLinkExtension(
-        IServiceProvider serviceProvider,
-        ArkadeLightningLimitsService limitsService)
-    {
-        _serviceProvider = serviceProvider;
-        _limitsService = limitsService;
-    }
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
     public PaymentMethodId PaymentMethodId { get; } = ArkadePlugin.ArkadePaymentMethodId;
 
     public string GetPaymentLink(PaymentPrompt prompt, IUrlHelper? urlHelper)
@@ -65,36 +55,21 @@ public class ArkadePaymentLinkExtension : IPaymentLinkExtension
             }
         }
         
-        // Add lightning invoice if available and within Boltz limits (prefer LN over LNURL)
-        if (ShouldIncludeLightning(prompt).Result)
+        // Prefer LN over LNURL. Arkade no longer provides Lightning itself, so this prompt
+        // belongs to another backend and carries its own limits.
+        if (ln is not null)
         {
-            if (ln is not null)
+            builder.WithLightning(ln.Destination);
+        }
+        else if (lnurl is not null && _serviceProvider.GetServices<IPaymentLinkExtension>()
+                     .FirstOrDefault(p => p.PaymentMethodId == lnurl.PaymentMethodId) is { } lnurlLink)
+        {
+            if (lnurlLink.GetPaymentLink(lnurl, urlHelper) is { } link)
             {
-                builder.WithLightning(ln.Destination);
-            }
-            else if (lnurl is not null && _serviceProvider.GetServices<IPaymentLinkExtension>()
-                         .FirstOrDefault(p => p.PaymentMethodId == lnurl.PaymentMethodId) is {} lnurlLink)
-            {
-                if (lnurlLink.GetPaymentLink(lnurl, urlHelper) is { } link)
-                {
-                    builder.WithLightning(link.Replace("lightning:", String.Empty));
-                }
+                builder.WithLightning(link.Replace("lightning:", string.Empty));
             }
         }
-        
+
         return builder.Build();
-    }
-
-    private async Task<bool> ShouldIncludeLightning(PaymentPrompt prompt)
-    {
-        // Get the invoice amount in satoshis
-        var amountSats = (long)Money.Coins(prompt.Calculate().Due).Satoshi;
-
-        // Use the centralized limits service to determine if Lightning should be included
-        // This handles caching of store configuration and Boltz limits validation
-        return await _limitsService.CanSupportLightningAsync(
-            prompt.ParentEntity.StoreId, 
-            amountSats, 
-            CancellationToken.None);
     }
 }
