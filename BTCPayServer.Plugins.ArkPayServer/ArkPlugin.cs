@@ -369,7 +369,6 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         return new ArkNetworkConfig(
             ArkUri: !string.IsNullOrEmpty(fileConfig?.ArkUri) ? fileConfig.ArkUri : preset.ArkUri,
             ArkadeWalletUri: !string.IsNullOrEmpty(fileConfig?.ArkadeWalletUri) ? fileConfig.ArkadeWalletUri : preset.ArkadeWalletUri,
-            BoltzUri: !string.IsNullOrEmpty(fileConfig?.BoltzUri) ? fileConfig.BoltzUri : preset.BoltzUri,
             ExplorerUri: !string.IsNullOrEmpty(fileConfig?.ExplorerUri) ? fileConfig.ExplorerUri : preset.ExplorerUri,
             // EsploraUri / ElectrumWsUri / ElectrumTcpUri arrived in
             // ArkNetworkConfig via NNark dotnet-sdk#96. They MUST be carried
@@ -396,7 +395,6 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
             return new ArkNetworkConfig(
                 ArkUri: "https://signet.arkade.sh",
                 ArkadeWalletUri: "https://signet.arkade.money",
-                BoltzUri: null,
                 ExplorerUri: "https://explorer.signet.arkade.sh",
                 // Signet endpoints mirror the canonical ts-sdk defaults
                 // (https://github.com/arkade-os/ts-sdk/blob/main/src/providers/onchain.ts
