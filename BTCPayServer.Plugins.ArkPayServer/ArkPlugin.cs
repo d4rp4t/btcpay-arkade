@@ -27,13 +27,14 @@ using NArk.Storage.EfCore.Entities;
 using NArk.Storage.EfCore.Hosting;
 using NBitcoin;
 using System.Text.Json;
-using BTCPayServer.Plugins.ArkPayServer.Services.Policies;
+using BTCPayServer.Plugins.ArkPayServer.Services.Settlement;
 using Microsoft.EntityFrameworkCore;
 using NArk.Core.Sweeper;
 using NArk.Core.Transformers;
 using NArk.Swaps.Policies;
 using NArk.Swaps.Transformers;
 using NArk.Abstractions.Contracts;
+using NArk.Abstractions.Settlement;
 
 namespace BTCPayServer.Plugins.ArkPayServer;
 
@@ -235,6 +236,10 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         // Core services and network config (includes caching transport by default)
         services.AddArkCoreServices();
         services.AddArkNetwork(networkConfig);
+
+        // Collaborative exit stays off: a destination here is always an Arkade address.
+        services.AddArkSettlement();
+        services.AddSingleton<ISettlementConfigProvider, WalletDestinationSettlementConfigProvider>();
     }
 
     private static void RegisterPluginServices(IServiceCollection services)
@@ -292,8 +297,6 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         // Tracks Arkade-operator reachability so plugin pages can show a friendly
         // "operator unavailable" banner instead of leaking raw gRPC/HTTP errors.
         services.AddSingleton<ArkOperatorHealthService>();
-
-        services.AddSingleton<ISweepPolicy, DestinationSweepPolicy>();
 
         services.AddSingleton<ArkadeCheckoutModelExtension>();
         services.AddSingleton<ICheckoutModelExtension>(sp => sp.GetRequiredService<ArkadeCheckoutModelExtension>());
