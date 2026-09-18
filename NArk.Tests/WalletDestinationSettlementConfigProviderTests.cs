@@ -6,7 +6,10 @@ using NArk.Core.Services;
 
 namespace NArk.Tests;
 
-/// <summary>The rules the destination sweep used to encode, now expressed as settlement config.</summary>
+/// <summary>
+/// Which wallets get a settlement rule. The cases that matter are the ones where an extra rule
+/// spins (a wallet settling to itself re-fires on its own output) or a missing one strands funds.
+/// </summary>
 public class WalletDestinationSettlementConfigProviderTests
 {
     private const string ArkDestination =
@@ -27,14 +30,13 @@ public class WalletDestinationSettlementConfigProviderTests
     }
 
     [Fact]
-    public async Task SingleKey_wallet_without_a_destination_settles_to_itself()
+    public async Task SingleKey_wallet_without_a_destination_gets_no_rule()
     {
+        // Settling a wallet to itself satisfies its own threshold with its own output, so the rule
+        // would re-fire forever. SingleKeyConsolidationSweepPolicy does this job coin-by-coin.
         var provider = Provider(Wallet("w1", destination: null, WalletType.SingleKey));
 
-        var config = Assert.Single(await provider.GetConfigs());
-
-        Assert.Equal(SettlementNetworks.Ark, config.Destination.Network);
-        Assert.Null(config.Destination.Address);
+        Assert.Empty(await provider.GetConfigs());
     }
 
     [Fact]
@@ -46,19 +48,18 @@ public class WalletDestinationSettlementConfigProviderTests
     }
 
     [Fact]
-    public async Task Destination_pending_reconfirmation_falls_back_to_self()
+    public async Task Destination_pending_reconfirmation_gets_no_rule()
     {
+        // The operator rotated its signer and the merchant has not re-confirmed the address, so
+        // paying it could pay somewhere the store no longer controls.
         var provider = Provider(Wallet("w1", ArkDestination, WalletType.SingleKey, pendingConfirmation: true));
 
-        var config = Assert.Single(await provider.GetConfigs());
-
-        Assert.Null(config.Destination.Address);
+        Assert.Empty(await provider.GetConfigs());
     }
 
     [Fact]
-    public async Task Hd_wallet_with_a_destination_pending_reconfirmation_settles_nowhere()
+    public async Task Hd_wallet_with_a_destination_pending_reconfirmation_gets_no_rule()
     {
-        // No single address to consolidate onto, so settlement pauses instead.
         var provider = Provider(Wallet("w1", ArkDestination, WalletType.HD, pendingConfirmation: true));
 
         Assert.Empty(await provider.GetConfigs());

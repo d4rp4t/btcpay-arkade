@@ -5,16 +5,19 @@ using NArk.Core.Services;
 namespace BTCPayServer.Plugins.ArkPayServer.Services.Settlement;
 
 /// <summary>
-/// Turns each wallet's configured sweep destination into a settlement rule, replacing the
-/// plugin-owned <c>DestinationSweepPolicy</c>.
+/// Turns each wallet's configured destination into a settlement rule.
 /// </summary>
 /// <remarks>
-/// A SingleKey wallet without a destination settles to itself rather than nowhere: every receive
-/// address it hands out is a hash-locked contract with its own preimage, so without that the
-/// balance stays scattered across one address per invoice. A destination flagged
-/// <see cref="DestinationSafety.PendingConfirmationMetadataKey"/> is treated as absent — the
-/// operator rotated its signer and the merchant has not re-confirmed the address, so paying it
-/// could pay somewhere the store no longer controls.
+/// Only an explicit destination produces a rule. Consolidating a wallet onto its own address is
+/// deliberately left to <see cref="Policies.SingleKeyConsolidationSweepPolicy"/>: a settlement rule
+/// is stated in balance, and a rule that settles a wallet to itself is satisfied by its own output,
+/// so it re-fires on the VTXO it just created and spins. Skipping the coins that already sit at the
+/// target is a coin-level test the config API cannot express.
+/// <para>
+/// A destination flagged <see cref="DestinationSafety.PendingConfirmationMetadataKey"/> is treated
+/// as absent — the operator rotated its signer and the merchant has not re-confirmed the address,
+/// so paying it could pay somewhere the store no longer controls.
+/// </para>
 /// </remarks>
 public class WalletDestinationSettlementConfigProvider(IWalletStorage walletStorage)
     : ISettlementConfigProvider
@@ -41,14 +44,9 @@ public class WalletDestinationSettlementConfigProvider(IWalletStorage walletStor
     }
 
     private static SettlementDestination? ResolveDestination(ArkWalletInfo wallet)
-    {
-        if (!string.IsNullOrEmpty(wallet.Destination) && !IsPendingConfirmation(wallet))
-            return SettlementDestination.Ark(wallet.Destination);
-
-        return wallet.WalletType == WalletType.SingleKey
-            ? SettlementDestination.ArkSelf()
+        => !string.IsNullOrEmpty(wallet.Destination) && !IsPendingConfirmation(wallet)
+            ? SettlementDestination.Ark(wallet.Destination)
             : null;
-    }
 
     private static bool IsPendingConfirmation(ArkWalletInfo wallet)
         => wallet.Metadata?.ContainsKey(DestinationSafety.PendingConfirmationMetadataKey) == true;

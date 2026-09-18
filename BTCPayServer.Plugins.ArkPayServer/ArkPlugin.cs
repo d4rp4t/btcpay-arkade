@@ -27,6 +27,7 @@ using NArk.Storage.EfCore.Entities;
 using NArk.Storage.EfCore.Hosting;
 using NBitcoin;
 using System.Text.Json;
+using BTCPayServer.Plugins.ArkPayServer.Services.Policies;
 using BTCPayServer.Plugins.ArkPayServer.Services.Settlement;
 using Microsoft.EntityFrameworkCore;
 using NArk.Core.Sweeper;
@@ -240,6 +241,7 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         // Collaborative exit stays off: a destination here is always an Arkade address.
         services.AddArkSettlement();
         services.AddSingleton<ISettlementConfigProvider, WalletDestinationSettlementConfigProvider>();
+        services.AddSingleton<ISweepPolicy, SingleKeyConsolidationSweepPolicy>();
     }
 
     private static void RegisterPluginServices(IServiceCollection services)
