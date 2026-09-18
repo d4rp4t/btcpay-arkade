@@ -116,7 +116,7 @@ jobs:
           # by the previous step so cheat-mode targets whichever exists,
           # rather than pinning to a name that goes stale across regtest bumps.
           ARKADE_CHEAT_ARK_CONTAINER: ${{ steps.arkd-container.outputs.name }}
-        run: dotnet test NArk.E2E.Tests/NArk.E2E.Tests.csproj --no-build --verbosity normal --logger "console;verbosity=detailed"
+        run: dotnet test --project NArk.E2E.Tests/NArk.E2E.Tests.csproj --no-build --output Detailed
         timeout-minutes: 20
 
       - name: Collect docker logs on failure

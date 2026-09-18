@@ -5,9 +5,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
-    <!-- xunit.v3 4.0.0 runs on Microsoft.Testing.Platform, which the .NET 10 SDK no longer
-         drives through VSTest. -->
-    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
     <IsTestProject>true</IsTestProject>
     <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
     <!-- BTCPay disables this so its own Tests project pulls plugin DLLs into
