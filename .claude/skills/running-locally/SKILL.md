@@ -73,5 +73,15 @@ First launch builds the whole BTCPay solution — allow ~5 minutes before the po
 - `nohup: failed to run command 'dotnet'` / `dotnet: command not found` — the shell predates the SDK install; open a new shell or extend PATH (Git Bash: `export PATH="$PATH:/c/Program Files/dotnet"`).
 - Polling the port too early and concluding startup failed — check `btcpay-run.err.log` for a real error first.
 - Manually running `createdb` — unnecessary, BTCPay/NBXplorer self-provision.
+- Hitting `ark send: not enough funds` on a wallet that clearly has a balance — the funded
+  CLI wallet goes unspendable **three minutes** after its last batch. The regtest defaults
+  denominate arkd's delays in blocks (anything under 512), but the CLI judges spendability from
+  a wall-clock timestamp it derives from that same number read as seconds. Cheat-mode then falls
+  back to `ark settle`, which fails with `missing forfeit transactions` and gets the script
+  banned. Either exercise the wallet regularly, or start the stack with every delay moved above
+  512 so they are read as seconds (arkd rejects a mix):
+  `ARKD_VTXO_TREE_EXPIRY=7200 ARKD_UNILATERAL_EXIT_DELAY=512 ARKD_PUBLIC_UNILATERAL_EXIT_DELAY=512 ARKD_BOARDING_EXIT_DELAY=1024 ARKD_CHECKPOINT_EXIT_DELAY=512 node submodules/NNark/regtest/regtest.mjs start --profile delegate`
+  — this is what the `e2e` workflow does. Don't do it when testing unilateral exit: it stretches
+  those delays from a few blocks to 8.5 minutes.
 - Passing `--profile boltz` — that profile is gone along with the swaps package. Valid names live in `submodules/NNark/regtest/lib/profiles.mjs`.
 - Expecting Lightning at checkout — the plugin no longer provides it at all (the Boltz rail was removed); it returns with the Arkade intent corridors.
