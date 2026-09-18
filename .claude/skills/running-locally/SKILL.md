@@ -1,6 +1,6 @@
 ---
 name: running-locally
-description: Use when asked to run, start, launch, smoke-test, or verify BTCPay Server with the Arkade plugin on a local machine — including standing up the regtest environment (bitcoind, arkd, Boltz, NBXplorer) or confirming a change works in the real app.
+description: Use when asked to run, start, launch, smoke-test, or verify BTCPay Server with the Arkade plugin on a local machine — including standing up the regtest environment (bitcoind, arkd, NBXplorer) or confirming a change works in the real app.
 ---
 
 # Running BTCPay + Arkade Plugin Locally
@@ -21,10 +21,10 @@ Plain agent-agnostic markdown — usable by any coding agent (it is referenced f
 ./setup.ps1   # Windows · ./setup.sh on Linux/macOS — submodules, workloads, publishes plugin, writes appsettings.dev.json
 ```
 
-## Start the regtest stack (~19 containers)
+## Start the regtest stack
 
 ```sh
-node submodules/NNark/regtest/regtest.mjs start --profile boltz,delegate
+node submodules/NNark/regtest/regtest.mjs start --profile delegate
 # Windows shortcut: start-test-env.cmd (args pass through: `start-test-env stop`, `... clean`, `... mine 5`)
 ```
 
@@ -73,4 +73,5 @@ First launch builds the whole BTCPay solution — allow ~5 minutes before the po
 - `nohup: failed to run command 'dotnet'` / `dotnet: command not found` — the shell predates the SDK install; open a new shell or extend PATH (Git Bash: `export PATH="$PATH:/c/Program Files/dotnet"`).
 - Polling the port too early and concluding startup failed — check `btcpay-run.err.log` for a real error first.
 - Manually running `createdb` — unnecessary, BTCPay/NBXplorer self-provision.
-- Expecting Lightning at checkout — the launch profile's c-lightning endpoint (30993) isn't in this stack; Arkade's Lightning flow goes through Boltz instead.
+- Passing `--profile boltz` — that profile is gone along with the swaps package. Valid names live in `submodules/NNark/regtest/lib/profiles.mjs`.
+- Expecting Lightning at checkout — the plugin no longer provides it at all (the Boltz rail was removed); it returns with the Arkade intent corridors.
