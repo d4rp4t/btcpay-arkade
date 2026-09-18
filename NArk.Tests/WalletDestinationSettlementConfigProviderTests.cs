@@ -15,10 +15,14 @@ public class WalletDestinationSettlementConfigProviderTests
     private const string ArkDestination =
         "tark1qqellv77udfmr20tun8dvju5vgudpf9vxe8jwhthrkn26fz96pawqfdy8nkgrmhu6tj2vuh3q6nzhlg8rlnf9gcqvqkn3wdxyxkpn8hcnszeaeq";
 
-    [Fact]
-    public async Task Wallet_with_a_destination_settles_there()
+    // A destination is honoured whatever the wallet type: only the no-destination case differs,
+    // where SingleKey consolidates locally and HD has no single address to consolidate onto.
+    [Theory]
+    [InlineData(WalletType.SingleKey)]
+    [InlineData(WalletType.HD)]
+    public async Task Wallet_with_a_destination_settles_there(WalletType walletType)
     {
-        var provider = Provider(Wallet("w1", destination: ArkDestination));
+        var provider = Provider(Wallet("w1", ArkDestination, walletType));
 
         var config = Assert.Single(await provider.GetConfigs());
 
