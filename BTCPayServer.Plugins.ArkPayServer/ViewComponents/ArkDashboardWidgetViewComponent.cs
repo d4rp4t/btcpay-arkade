@@ -13,8 +13,6 @@ using NArk.Core.Contracts;
 using NArk.Core.Transport;
 using NArk.Hosting;
 using NBitcoin.Scripting;
-using NArk.Swaps.Boltz;
-using NArk.Swaps.Boltz.Client;
 
 namespace BTCPayServer.Plugins.ArkPayServer.ViewComponents;
 
@@ -26,9 +24,7 @@ public class ArkDashboardWidgetViewComponent(
     ArkController arkController,
     IVtxoStorage vtxoStorage,
     IIntentStorage intentStorage,
-    IWalletStorage walletStorage,
-    BoltzClient? boltzClient = null,
-    BoltzLimitsValidator? boltzLimitsValidator = null) : ViewComponent
+    IWalletStorage walletStorage) : ViewComponent
 {
     public async Task<IViewComponentResult> InvokeAsync(StoreDashboardViewModel dashboardModel)
     {
@@ -129,25 +125,6 @@ public class ArkDashboardWidgetViewComponent(
                 {
                     model.ArkOperatorConnected = false;
                     model.ArkOperatorError = ex.Message;
-                }
-            }
-
-            // Get Boltz connection status
-            if (boltzClient != null)
-            {
-                model.BoltzUrl = arkNetworkConfig.BoltzUri;
-                try
-                {
-                    if (boltzLimitsValidator != null)
-                    {
-                        var limits = await boltzLimitsValidator.GetAllLimitsAsync();
-                        model.BoltzConnected = limits != null;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    model.BoltzConnected = false;
-                    model.BoltzError = ex.Message;
                 }
             }
 

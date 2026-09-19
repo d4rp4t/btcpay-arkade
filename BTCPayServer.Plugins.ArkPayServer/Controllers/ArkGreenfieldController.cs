@@ -7,7 +7,6 @@ using BTCPayServer.Lightning;
 using BTCPayServer.Payments;
 using BTCPayServer.Payments.Lightning;
 using BTCPayServer.Plugins.ArkPayServer.Exceptions;
-using BTCPayServer.Plugins.ArkPayServer.Lightning;
 using BTCPayServer.Plugins.ArkPayServer.Models;
 using BTCPayServer.Plugins.ArkPayServer.Models.Api;
 using BTCPayServer.Plugins.ArkPayServer.Models.Api.Greenfield;
@@ -33,9 +32,6 @@ using NArk.Core.Services;
 using NArk.Core.Transport;
 using NArk.Core.Wallet;
 using NArk.Hosting;
-using NArk.Swaps.Abstractions;
-using NArk.Swaps.Boltz;
-using NArk.Swaps.Models;
 using NBitcoin;
 using NBitcoin.Scripting;
 
@@ -61,15 +57,12 @@ public class ArkGreenfieldController(
     IBitcoinBlockchain bitcoinTimeChainProvider,
     VtxoSynchronizationService vtxoSyncService,
     IContractStorage contractStorage,
-    ISwapStorage swapStorage,
     IVtxoStorage vtxoStorage,
     IWalletStorage walletStorage,
-    ArkLightningSpendKeyService spendKeyService,
     IWalletProvider walletProvider,
     IIntentStorage intentStorage,
     BoardingUtxoSyncService boardingUtxoSyncService,
-    IHttpClientFactory httpClientFactory,
-    BoltzLimitsValidator? boltzLimitsValidator) : ControllerBase
+    IHttpClientFactory httpClientFactory) : ControllerBase
 {
     private string? CurrentStoreId => HttpContext.GetStoreData()?.Id;
 
@@ -114,8 +107,7 @@ public class ArkGreenfieldController(
             Destination = wallet?.Destination,
             AllowSubDustAmounts = config.AllowSubDustAmounts,
             BoardingEnabled = config.BoardingEnabled,
-            MinBoardingAmountSats = config.MinBoardingAmountSats,
-            LightningEnabled = IsArkadeLightningEnabled()
+            MinBoardingAmountSats = config.MinBoardingAmountSats
         });
     }
 
@@ -171,13 +163,6 @@ public class ArkGreenfieldController(
             store.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], config);
             store.SetDefaultPaymentId(ArkadePlugin.ArkadePaymentMethodId);
 
-            // Enable Lightning if requested
-            var lightningEnabled = false;
-            if (request.EnableLightning)
-            {
-                lightningEnabled = await ConfigureLightning(store, walletId!, isNew, cancellationToken);
-            }
-
             await storeRepository.UpdateStore(store);
 
             return Ok(new ArkWalletSetupResponse
@@ -185,7 +170,6 @@ public class ArkGreenfieldController(
                 WalletId = walletId!,
                 WalletType = (walletInfo?.WalletType ?? WalletType.SingleKey).ToString(),
                 IsNewWallet = isNew,
-                LightningEnabled = lightningEnabled,
                 Mnemonic = mnemonic
             });
         }
@@ -474,35 +458,11 @@ public class ArkGreenfieldController(
             var serverInfo = await clientTransport.GetServerInfoAsync(cancellationToken);
             var response = new ArkFeeEstimateData();
 
-            // Lightning short-circuit: single destination that looks like a Lightning destination.
-            if (request.Outputs.Count == 1)
+            if (request.Outputs.Count == 1 &&
+                ArkSpendHelpers.IsLightningDestination(request.Outputs[0].Destination?.Trim() ?? string.Empty))
             {
-                var dest = request.Outputs[0].Destination?.Trim() ?? string.Empty;
-                if (ArkSpendHelpers.IsLightningDestination(dest))
-                {
-                    if (boltzLimitsValidator == null)
-                        return this.CreateAPIError(503, "boltz-not-configured",
-                            "Lightning swaps are not available: Boltz integration is not configured.");
-
-                    var limits = await boltzLimitsValidator.GetAllLimitsAsync(cancellationToken);
-                    if (limits == null)
-                        return this.CreateAPIError(503, "boltz-unavailable",
-                            "Boltz instance does not support Ark.");
-
-                    var amountSats = request.Outputs[0].AmountSats ?? 0L;
-                    if (amountSats <= 0)
-                        return this.CreateAPIError("missing-amount",
-                            "amountSats is required when estimating a Lightning fee.");
-
-                    response.IsLightning = true;
-                    response.FeePercentage = limits.SubmarineFeePercentage * 100m;
-                    response.MinerFeeSats = limits.SubmarineMinerFee;
-                    response.EstimatedFeeSats =
-                        (long)Math.Ceiling(amountSats * limits.SubmarineFeePercentage) + limits.SubmarineMinerFee;
-                    response.FeeDescription =
-                        $"{limits.SubmarineFeePercentage * 100m:F2}% + {limits.SubmarineMinerFee} sats miner fee";
-                    return Ok(response);
-                }
+                return this.CreateAPIError("lightning-not-supported",
+                    "Lightning destinations are not supported.");
             }
 
             // Non-Lightning: resolve coins (auto or explicit), then build outputs and estimate.
@@ -523,9 +483,6 @@ public class ArkGreenfieldController(
 
                 SuggestCoinsResponse suggestion = destType switch
                 {
-                    DestinationType.LightningInvoice =>
-                        ArkSpendHelpers.SelectCoins(
-                            nonRecoverable.Any() ? nonRecoverable : availableCoins, targetSats, SpendType.Swap),
                     DestinationType.BitcoinAddress =>
                         ArkSpendHelpers.SelectCoins(availableCoins, targetSats, SpendType.Batch),
                     _ when string.Equals(request.SpendType, "Batch", StringComparison.OrdinalIgnoreCase) =>
@@ -625,9 +582,7 @@ public class ArkGreenfieldController(
         if (firstWithDest != null)
         {
             var firstDest = firstWithDest.Destination!.Trim();
-            if (ArkSpendHelpers.IsLightningDestination(firstDest))
-                destType = DestinationType.LightningInvoice;
-            else if (firstDest.StartsWith("bc1", StringComparison.OrdinalIgnoreCase)
+            if (firstDest.StartsWith("bc1", StringComparison.OrdinalIgnoreCase)
                   || firstDest.StartsWith("tb1", StringComparison.OrdinalIgnoreCase)
                   || firstDest.StartsWith("bcrt1", StringComparison.OrdinalIgnoreCase)
                   || firstDest.StartsWith("1") || firstDest.StartsWith("3"))
@@ -740,17 +695,6 @@ public class ArkGreenfieldController(
             result.ResolvedAddress = rawDestination;
             result.LnurlMinSats = (long)info.MinSendable.ToUnit(LightMoneyUnit.Satoshi);
             result.LnurlMaxSats = (long)info.MaxSendable.ToUnit(LightMoneyUnit.Satoshi);
-
-            // Intersect with Boltz submarine swap limits when available.
-            if (boltzLimitsValidator != null)
-            {
-                var limits = await boltzLimitsValidator.GetAllLimitsAsync(cancellationToken);
-                if (limits != null)
-                {
-                    result.LnurlMinSats = Math.Max(result.LnurlMinSats, limits.SubmarineMinAmount);
-                    result.LnurlMaxSats = Math.Min(result.LnurlMaxSats, limits.SubmarineMaxAmount);
-                }
-            }
 
             result.AmountSats = amountBtc.HasValue ? (long)(amountBtc.Value * 100_000_000m) : 0L;
             result.IsValid = true;
@@ -994,79 +938,6 @@ public class ArkGreenfieldController(
 
     #endregion
 
-    #region Swaps
-
-    /// <summary>
-    /// List swaps (Lightning/chain) for the store's wallet.
-    /// </summary>
-    [HttpGet("~/api/v1/stores/{storeId}/arkade/swaps")]
-    [Authorize(Policy = Policies.CanViewStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Greenfield)]
-    public async Task<IActionResult> ListSwaps(string storeId,
-        [FromQuery] int skip = 0,
-        [FromQuery] int take = 100,
-        [FromQuery] string? status = null,
-        CancellationToken cancellationToken = default)
-    {
-        var (config, error) = GetStoreConfig();
-        if (error != null) return error;
-
-        take = Math.Min(take, 500);
-
-        ArkSwapStatus[]? statusFilter = null;
-        if (!string.IsNullOrEmpty(status) && Enum.TryParse<ArkSwapStatus>(status, true, out var parsedStatus))
-            statusFilter = [parsedStatus];
-
-        var swaps = await swapStorage.GetSwaps(
-            walletIds: [config!.WalletId!],
-            skip: skip,
-            take: take,
-            status: statusFilter,
-            cancellationToken: cancellationToken);
-
-        var result = swaps.Select(s => new ArkSwapData
-        {
-            SwapId = s.SwapId,
-            WalletId = s.WalletId,
-            Type = s.SwapType.ToString(),
-            Status = s.Status.ToString(),
-            AmountSats = s.ExpectedAmount,
-            CreatedAt = s.CreatedAt,
-            Metadata = FilterPublicSwapMetadata(s.Metadata)
-        }).ToList();
-
-        return Ok(result);
-    }
-
-    // Swap metadata is an internal bookkeeping dictionary that, for chain/reverse
-    // swaps, holds spend-capable secrets — the ephemeral refund private key
-    // (ephemeralKey), the claim preimage, and the full Boltz lockup response
-    // (boltzResponse). Those must never leave the server, so the API exposes only
-    // an explicit allow-list of non-sensitive keys (default-deny: any key not
-    // listed — including any added in future — is dropped). Keys mirror
-    // NArk.Swaps.Models.SwapMetadata; string literals keep this filter independent
-    // of the bundled SDK version.
-    private static readonly HashSet<string> PublicSwapMetadataKeys = new(StringComparer.Ordinal)
-    {
-        "btcAddress",
-        "crossSigned",
-        "refundDestination",
-        "providerId",
-        "route.source.network",
-        "route.source.assetId",
-        "route.destination.network",
-        "route.destination.assetId",
-    };
-
-    private static Dictionary<string, string>? FilterPublicSwapMetadata(
-        IReadOnlyDictionary<string, string>? metadata)
-        => metadata is null
-            ? null
-            : metadata
-                .Where(kv => PublicSwapMetadataKeys.Contains(kv.Key))
-                .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
-
-    #endregion
-
     #region Server Info
 
     /// <summary>
@@ -1139,30 +1010,6 @@ public class ArkGreenfieldController(
             };
         }
 
-        // Check Boltz
-        if (boltzLimitsValidator != null)
-        {
-            try
-            {
-                var limits = await boltzLimitsValidator.GetAllLimitsAsync(cancellationToken);
-                status.Boltz = new ArkServiceConnectionData
-                {
-                    Url = arkNetworkConfig.BoltzUri,
-                    IsConnected = limits != null,
-                    Error = limits == null ? "Boltz instance does not support Ark" : null
-                };
-            }
-            catch (Exception ex)
-            {
-                status.Boltz = new ArkServiceConnectionData
-                {
-                    Url = arkNetworkConfig.BoltzUri,
-                    IsConnected = false,
-                    Error = ex.Message
-                };
-            }
-        }
-
         // Blockchain info
         try
         {
@@ -1179,53 +1026,6 @@ public class ArkGreenfieldController(
         }
 
         return Ok(status);
-    }
-
-    #endregion
-
-    #region Boltz Limits
-
-    /// <summary>
-    /// Get Boltz swap limits and fees.
-    /// </summary>
-    [HttpGet("~/api/v1/stores/{storeId}/arkade/boltz-limits")]
-    [Authorize(Policy = Policies.CanViewStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Greenfield)]
-    public async Task<IActionResult> GetBoltzLimits(string storeId, CancellationToken cancellationToken)
-    {
-        var (_, error) = GetStoreConfig();
-        if (error != null) return error;
-
-        if (boltzLimitsValidator == null)
-            return this.CreateAPIError(404, "boltz-not-configured", "Boltz integration is not configured.");
-
-        try
-        {
-            var limits = await boltzLimitsValidator.GetAllLimitsAsync(cancellationToken);
-            if (limits == null)
-                return this.CreateAPIError(503, "boltz-unavailable", "Boltz instance does not support Ark.");
-
-            return Ok(new ArkBoltzLimitsData
-            {
-                Submarine = new ArkSwapLimitData
-                {
-                    MinAmountSats = limits.SubmarineMinAmount,
-                    MaxAmountSats = limits.SubmarineMaxAmount,
-                    FeePercentage = limits.SubmarineFeePercentage,
-                    MinerFeeSats = limits.SubmarineMinerFee
-                },
-                Reverse = new ArkSwapLimitData
-                {
-                    MinAmountSats = limits.ReverseMinAmount,
-                    MaxAmountSats = limits.ReverseMaxAmount,
-                    FeePercentage = limits.ReverseFeePercentage,
-                    MinerFeeSats = limits.ReverseMinerFee
-                }
-            });
-        }
-        catch (Exception ex)
-        {
-            return this.CreateAPIError(503, "boltz-unavailable", $"Cannot reach Boltz: {ex.Message}");
-        }
     }
 
     #endregion
@@ -1278,15 +1078,6 @@ public class ArkGreenfieldController(
     private T? GetConfig<T>(PaymentMethodId paymentMethodId, StoreData store) where T : class
     {
         return store.GetPaymentMethodConfig<T>(paymentMethodId, paymentMethodHandlerDictionary);
-    }
-
-    private bool IsArkadeLightningEnabled()
-    {
-        var store = HttpContext.GetStoreData();
-        if (store == null) return false;
-        var lnConfig = store.GetPaymentMethodConfig<LightningPaymentMethodConfig>(
-            PaymentTypes.LN.GetPaymentMethodId("BTC"), paymentMethodHandlerDictionary);
-        return lnConfig?.ConnectionString?.StartsWith("type=arkade", StringComparison.InvariantCultureIgnoreCase) is true;
     }
 
     private async Task<ArkBalanceData> ComputeBalances(string walletId, CancellationToken cancellationToken)
@@ -1402,33 +1193,6 @@ public class ArkGreenfieldController(
 
         throw new InvalidOperationException(
             "Unsupported wallet input. Provide a BIP-39 mnemonic (12/24 words), nsec key, Ark address, or existing wallet ID.");
-    }
-
-    private async Task<bool> ConfigureLightning(StoreData store, string walletId, bool generatedByStore,
-        CancellationToken cancellationToken)
-    {
-        var lightningPaymentMethodId = PaymentTypes.LN.GetPaymentMethodId("BTC");
-        var existingLnConfig = store.GetPaymentMethodConfig<LightningPaymentMethodConfig>(
-            lightningPaymentMethodId, paymentMethodHandlerDictionary);
-        if (existingLnConfig != null) return false;
-
-        var lnurlPaymentMethodId = PaymentTypes.LNURL.GetPaymentMethodId("BTC");
-
-        var lnConfig = new LightningPaymentMethodConfig
-        {
-            ConnectionString = generatedByStore
-                ? await spendKeyService.BuildConnectionStringAsync(walletId, cancellationToken)
-                : ArkLightningSpendKeyService.BuildReceiveOnlyConnectionString(walletId),
-        };
-
-        store.SetPaymentMethodConfig(paymentMethodHandlerDictionary[lightningPaymentMethodId], lnConfig);
-        store.SetPaymentMethodConfig(paymentMethodHandlerDictionary[lnurlPaymentMethodId], new LNURLPaymentMethodConfig
-        {
-            UseBech32Scheme = true,
-            LUD12Enabled = true
-        });
-
-        return true;
     }
 
     private async Task<string?> FindManualReceiveAddress(string walletId, CancellationToken cancellationToken)

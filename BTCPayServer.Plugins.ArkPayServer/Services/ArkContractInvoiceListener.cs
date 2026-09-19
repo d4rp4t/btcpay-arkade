@@ -9,7 +9,6 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NArk.Abstractions.VTXOs;
-using NArk.Swaps.Abstractions;
 using NArk.Core.Transport;
 using NBitcoin;
 using NBXplorer;
@@ -17,7 +16,6 @@ using Newtonsoft.Json.Linq;
 using NArk.Abstractions;
 using NArk.Abstractions.Contracts;
 using NArk.Abstractions.Extensions;
-using NArk.Swaps.Services;
 using NArk.Storage.EfCore.Entities;
 
 namespace BTCPayServer.Plugins.ArkPayServer.Services;
@@ -31,7 +29,6 @@ public class ArkContractInvoiceListener(
     IContractStorage contractStorage,
     PaymentService paymentService,
     IVtxoStorage vtxoStorage,
-    ISwapStorage swapStorage,
     ILogger<ArkContractInvoiceListener> logger)
     : IHostedService
 {
@@ -46,29 +43,8 @@ public class ArkContractInvoiceListener(
 
         // Subscribe to NNark's storage events directly
         vtxoStorage.VtxosChanged += OnVtxoChanged;
-        swapStorage.SwapsChanged += OnSwapChanged;
-
 
         _ = PollAllInvoices(cancellationToken);
-    }
-
-    private async void OnSwapChanged(object? sender, NArk.Swaps.Models.ArkSwap swap)
-    {
-        try
-        {
-            // Only process reverse submarine swaps (Lightning -> Ark)
-            if (swap.SwapType != NArk.Swaps.Models.ArkSwapType.ReverseSubmarine)
-                return;
-
-            var activityState = swap.Status == NArk.Swaps.Models.ArkSwapStatus.Pending
-                ? ContractActivityState.Active
-                : ContractActivityState.Inactive;
-            await contractStorage.UpdateContractActivityState(swap.WalletId, swap.ContractScript, activityState);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error handling swap change for {SwapId}", swap.SwapId);
-        }
     }
 
     private async Task OnInvoiceEvent(InvoiceEvent invoiceEvent)
@@ -225,7 +201,6 @@ public class ArkContractInvoiceListener(
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         vtxoStorage.VtxosChanged -= OnVtxoChanged;
-        swapStorage.SwapsChanged -= OnSwapChanged;
         _leases.Dispose();
         _leases = new CompositeDisposable();
     }
@@ -247,8 +222,6 @@ public class ArkContractInvoiceListener(
         // the Payment one (derived from the prompt's details), so the
         // boarding contract stayed Active forever after settlement. Find every
         // contract carrying this invoice's source tag and toggle them all.
-        // HTLC contracts use a different "swap:{id}" Source tag and are
-        // driven by OnSwapChanged based on swap state, not invoice state.
         var walletId = listenedContract.Details.WalletId;
         var invoiceSource = $"invoice:{invoice.Id}";
         var contracts = await contractStorage.GetContracts(

@@ -5,7 +5,6 @@
 @using BTCPayServer.Plugins.ArkPayServer.Services
 @using NArk.Abstractions.Wallets
 @using NArk.Abstractions.Intents
-@using NArk.Swaps.Models
 @using NBitcoin
 @model BTCPayServer.Plugins.ArkPayServer.Models.StoreOverviewViewModel
 @inject IScopeProvider ScopeProvider
@@ -98,43 +97,6 @@
 
                 <!-- Right Column: Features -->
                 <div class="col-md-6">
-                    @if (!string.IsNullOrEmpty(Model.BoltzUrl))
-                    {
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <span class="text-muted">Lightning</span>
-                            <form asp-action="@(Model.IsLightningEnabled ? "DisableLightning" : "EnableLightning")" method="post" asp-route-storeId="@storeId" class="d-inline">
-                                <button type="submit" class="btn btn-sm  badge  text-primary @(Model.IsLightningEnabled ? "btn-outline-secondary" : "btn-outline-primary")">
-                                    @(Model.IsLightningEnabled ? "Disable" : "Enable")
-                                </button>
-                            </form>
-                        </div>
-                    }
-                    else
-                    {
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <span class="text-muted">Lightning</span>
-                            <span class="badge text-bg-secondary" title="Requires a Boltz swap service — configure the Boltz URL in Arkade server settings">Unavailable</span>
-                        </div>
-                    }
-
-                    @if (Model.IsLightningEnabled)
-                    {
-                        var senderPays = Model.ReverseSwapFeePayer == ReverseSwapFeePayer.Sender;
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <span class="text-muted">Reverse Swap Fee</span>
-                            <form asp-action="UpdateWalletConfig" method="post" asp-route-storeId="@storeId" class="d-inline">
-                                <button type="submit" name="command" value="toggle-fee-payer"
-                                        class="btn btn-sm badge text-primary @(senderPays ? "btn-outline-warning" : "btn-outline-secondary")"
-                                        data-testid="toggle-fee-payer-btn"
-                                        title="@(senderPays
-                                                   ? "Sender pays the Boltz fee: invoices exceed the requested amount and are rejected by LNURL/checkout (LUD-06) wallets. Click to switch back to Recipient."
-                                                   : "Recipient pays the Boltz fee: invoices match the requested amount (LUD-06-safe); you net the amount minus the fee. Click to make the sender pay instead.")">
-                                    @(senderPays ? "Sender pays" : "Recipient pays")
-                                </button>
-                            </form>
-                        </div>
-                    }
-
                     <div class="d-flex justify-content-between align-items-center mb-2">
                         <span class="text-muted">Auto-Sweep</span>
                         @if (Model.CanManagePrivateKeys)
@@ -206,7 +168,7 @@
                             <form asp-action="Rescan" asp-route-storeId="@storeId" method="post" class="d-inline">
                                 <button type="submit"
                                         class="btn btn-sm badge btn-outline-secondary text-primary"
-                                        title="Rescan the indexer + boltz to rebuild contracts, derivation index, funds and swaps for this wallet"
+                                        title="Rescan the indexer to rebuild contracts, derivation index and funds for this wallet"
                                         data-testid="rescan-wallet-btn">
                                     Rescan
                                 </button>
@@ -221,7 +183,7 @@
                                 }
                                 else if (rec.State == RecoveryState.Completed)
                                 {
-                                    <span class="text-muted">Last recovery: @rec.ContractsRecovered contracts, @rec.FundsSynced VTXOs, @rec.SwapsAudited swaps.</span>
+                                    <span class="text-muted">Last recovery: @rec.ContractsRecovered contracts, @rec.FundsSynced VTXOs.</span>
                                 }
                                 else
                                 {
@@ -301,10 +263,10 @@
     </div>
 </div>
 
-<!-- Recent Intents + Recent Swaps -->
+<!-- Recent Batches -->
 <div class="row g-4 mb-4">
-    <!-- Recent Intents -->
-    <div class="col-md-6">
+    <!-- Recent Batches -->
+    <div class="col-12">
         <div class="bg-tile rounded p-3 p-sm-4 h-100">
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h2 class="h5 mb-0">Recent Batches</h2>
@@ -374,70 +336,6 @@
         </div>
     </div>
 
-    <!-- Recent Swaps -->
-    <div class="col-md-6">
-        <div class="bg-tile rounded p-3 p-sm-4 h-100">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h2 class="h5 mb-0">Recent Swaps</h2>
-                <a asp-action="Swaps" asp-route-storeId="@storeId" class="btn btn-sm btn-outline-secondary">
-                    View All
-                </a>
-            </div>
-            @if (Model.RecentSwaps.Any())
-            {
-                <div class="table-responsive">
-                    <table class="table table-sm mb-0">
-                        <thead>
-                            <tr>
-                                <th text-translate="true">Swap ID</th>
-                                <th text-translate="true">Type</th>
-                                <th text-translate="true">Amount</th>
-                                <th text-translate="true">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var swap in Model.RecentSwaps)
-                            {
-                                var boltzSwapLink = ArkadeLinkHelper.GetSwapLink(ArkNetworkConfig, swap.SwapId);
-                                <tr>
-                                    <td>
-                                        <vc:truncate-center text="@swap.SwapId" link="@boltzSwapLink" classes="truncate-center-id"/>
-                                    </td>
-                                    <td>
-                                        @if (swap.SwapType == ArkSwapType.ReverseSubmarine)
-                                        {
-                                            <span class="badge text-bg-primary">Reverse</span>
-                                        }
-                                        else
-                                        {
-                                            <span class="badge text-bg-info">Submarine</span>
-                                        }
-                                    </td>
-                                    <td>@Money.Satoshis(swap.ExpectedAmount).ToDecimal(MoneyUnit.BTC) BTC</td>
-                                    <td>
-                                        @{
-                                            var swapBadge = swap.Status switch
-                                            {
-                                                ArkSwapStatus.Pending => "text-bg-info",
-                                                ArkSwapStatus.Settled => "text-bg-success",
-                                                ArkSwapStatus.Failed => "text-bg-danger",
-                                                _ => "text-bg-warning"
-                                            };
-                                        }
-                                        <span class="badge @swapBadge">@Enum.GetName(typeof(ArkSwapStatus), swap.Status)</span>
-                                    </td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-            }
-            else
-            {
-                <p class="text-muted text-center mb-0">No swaps yet</p>
-            }
-        </div>
-    </div>
 </div>
 
 <!-- Auto-Sweep Configuration Modal -->
@@ -566,7 +464,6 @@
                     <p class="mb-3">Are you sure you want to clear the wallet configuration? This action will:</p>
                     <ul>
                         <li>Remove the Arkade payment method from this store</li>
-                        <li>Disable Lightning if enabled via Arkade</li>
                         <li>Not delete any funds or VTXOs (they remain on the network)</li>
                     </ul>
                     @if (Model.SignerAvailable && !string.IsNullOrEmpty(Model.Wallet))

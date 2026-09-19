@@ -7,7 +7,6 @@ public class ArkStatusData
 {
     public bool IsConfigured { get; set; }
     public ArkServiceConnectionData ArkOperator { get; set; } = new();
-    public ArkServiceConnectionData? Boltz { get; set; }
     public ArkBlockchainData? Blockchain { get; set; }
 }
 

@@ -9,7 +9,6 @@ public class ArkPluginDbContext(DbContextOptions<ArkPluginDbContext> options) : 
     public DbSet<ArkWalletEntity> Wallets { get; set; }
     public DbSet<ArkWalletContractEntity> WalletContracts { get; set; }
     public DbSet<VtxoEntity> Vtxos { get; set; }
-    public DbSet<ArkSwapEntity> Swaps { get; set; }
     public DbSet<ArkIntentEntity> Intents { get; set; }
     public DbSet<ArkIntentVtxoEntity> IntentVtxos { get; set; }
 
@@ -25,10 +24,6 @@ public class ArkPluginDbContext(DbContextOptions<ArkPluginDbContext> options) : 
         modelBuilder.Entity<ArkWalletContractEntity>(entity =>
         {
             entity.Property(e => e.ContractDataJson).HasColumnType("jsonb");
-            entity.Property(e => e.MetadataJson).HasColumnType("jsonb");
-        });
-        modelBuilder.Entity<ArkSwapEntity>(entity =>
-        {
             entity.Property(e => e.MetadataJson).HasColumnType("jsonb");
         });
     }
