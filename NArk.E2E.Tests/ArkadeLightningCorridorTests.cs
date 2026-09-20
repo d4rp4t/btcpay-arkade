@@ -33,13 +33,13 @@ namespace NArk.E2E.Tests;
 /// ARKD_VTXO_TREE_EXPIRY=15360 ARKD_UNILATERAL_EXIT_DELAY=512 \
 /// ARKD_PUBLIC_UNILATERAL_EXIT_DELAY=512 ARKD_BOARDING_EXIT_DELAY=2048 \
 /// ARKD_CHECKPOINT_EXIT_DELAY=1536 COVCLAIMD_IMAGE=ghcr.io/arkade-os/covclaimd:v0.0.1-rc.4 \
-/// node submodules/NNark/regtest/regtest.mjs start --clean --profile emulator,covclaimd,boltz
+/// node submodules/NNark/regtest/regtest.mjs start --clean --profile emulator,covclaimd,lightning
 ///
 /// # 2. the swap solver. Rebuild it if its build predates the
 /// #    decimal-string amount encoding refuses every request with unsupported_payload — and
 /// #    re-copy the stack's LND credentials, which a --clean regenerates:
-/// #      docker cp boltz-lnd:/root/.lnd/tls.cert ./boltz-lnd-tls.cert
-/// #      docker cp boltz-lnd:/root/.lnd/data/chain/bitcoin/regtest/admin.macaroon ./boltz-lnd-admin.macaroon
+/// #      docker cp lnd-peer:/root/.lnd/tls.cert ./lnd-peer-tls.cert
+/// #      docker cp lnd-peer:/root/.lnd/data/chain/bitcoin/regtest/admin.macaroon ./lnd-peer-admin.macaroon
 /// #    Then fund its Arkade wallet and serve:
 /// #      node scripts/regtest-fund.mjs &lt;regtest-dir&gt; 0.05 &amp;&amp; node scripts/regtest-settle.mjs
 /// PORT=7095 node --experimental-eventsource --env-file=.env.regtest.lnd dist/cli.js serve
@@ -53,7 +53,7 @@ namespace NArk.E2E.Tests;
 /// TESTS_BTCNBXPLORERURL="http://127.0.0.1:32838/" \
 /// TESTS_POSTGRES="Host=localhost;Port=39372;Database=btcpay_e2e_test;Username=postgres" \
 /// TESTS_HOSTNAME=127.0.0.1 ARKADE_E2E_SOLVER_URL=http://127.0.0.1:7095 \
-///   dotnet test NArk.E2E.Tests --filter "Category=LightningCorridors"
+///   dotnet test --project NArk.E2E.Tests/NArk.E2E.Tests.csproj --filter-trait "Category=LightningCorridors"
 /// </code>
 /// </para>
 /// <para>

@@ -91,7 +91,7 @@
             nfcDisplay () {
                 // Enable NFC for ARKADE payment method
                 const isArkade = this.model.paymentMethodId === 'ARKADE';
-                const hasLightning = !!this.lightning && this.shouldShowLightning;
+                const hasLightning = !!this.lightning;
                 return isArkade && hasLightning && (this.nfcSupported || this.nfcTestFallback);
             },
             nfcTestFallback () {

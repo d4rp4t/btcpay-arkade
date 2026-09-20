@@ -38,6 +38,9 @@ using NArk.Swaps.Transformers;
 using Microsoft.EntityFrameworkCore;
 using NArk.Core.Sweeper;
 using NArk.Core.Transformers;
+using BTCPayServer.Plugins.ArkPayServer.Services.Settlement;
+using NArk.Abstractions.Contracts;
+using NArk.Abstractions.Settlement;
 
 namespace BTCPayServer.Plugins.ArkPayServer;
 
@@ -50,7 +53,7 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
 
     public override IBTCPayServerPlugin.PluginDependency[] Dependencies { get; } =
     [
-        new() { Identifier = nameof(BTCPayServer), Condition = ">=2.4.2" }
+        new() { Identifier = nameof(BTCPayServer), Condition = ">=2.4.4" }
     ];
 
     public override void Execute(IServiceCollection services)
@@ -135,6 +138,9 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
                     EF.Functions.ILike(c.MetadataJson ?? "", pattern));
             };
         });
+
+        // Swap persistence is opt-in on its own package now, and the corridors are what read it.
+        services.AddArkadeEfCoreStorage();
     }
 
     private static void RegisterNArkCore(IServiceCollection services, ArkNetworkConfig networkConfig)
@@ -248,6 +254,11 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         // Core services and network config (includes caching transport by default)
         services.AddArkCoreServices();
         services.AddArkNetwork(networkConfig);
+
+        // Collaborative exit stays off: a destination here is always an Arkade address.
+        services.AddArkSettlement();
+        services.AddSingleton<ISettlementConfigProvider, WalletDestinationSettlementConfigProvider>();
+        services.AddSingleton<ISweepPolicy, SingleKeyConsolidationSweepPolicy>();
     }
 
     private static void RegisterPluginServices(IServiceCollection services)
@@ -306,8 +317,6 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         // "operator unavailable" banner instead of leaking raw gRPC/HTTP errors.
         services.AddSingleton<ArkOperatorHealthService>();
 
-        services.AddSingleton<ISweepPolicy, DestinationSweepPolicy>();
-
         services.AddSingleton<ArkadeCheckoutModelExtension>();
         services.AddSingleton<ICheckoutModelExtension>(sp => sp.GetRequiredService<ArkadeCheckoutModelExtension>());
         services.AddSingleton<IGlobalCheckoutModelExtension>(sp => sp.GetRequiredService<ArkadeCheckoutModelExtension>());
@@ -333,7 +342,6 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         services.AddUIExtension("dashboard-setup-guide-payment", "/Views/Ark/DashboardSetupGuidePayment.cshtml");
         services.AddUIExtension("store-invoices-payments", "/Views/Ark/ArkPaymentData.cshtml");
         services.AddUIExtension("store-wallets-nav", "/Views/Ark/ArkWalletNav.cshtml");
-        services.AddUIExtension("ln-payment-method-setup-tab", "/Views/Lightning/LNPaymentMethodSetupTab.cshtml");
         services.AddUIExtension("dashboard", "/Views/Ark/ArkDashboardWidget.cshtml");
         services.AddUIExtension("dashboard", "/Views/Ark/ArkActivityDashboardWidget.cshtml");
     }

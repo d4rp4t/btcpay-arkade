@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
 {
     [DbContext(typeof(ArkPluginDbContext))]
-    [Migration("20260814002907_AddArkadeSwapIntents")]
+    [Migration("20260920070311_AddArkadeSwapIntents")]
     partial class AddArkadeSwapIntents
     {
         /// <inheritdoc />
@@ -21,7 +21,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("BTCPayServer.Plugins.Ark")
-                .HasAnnotation("ProductVersion", "10.0.6")
+                .HasAnnotation("ProductVersion", "10.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -115,60 +115,6 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
                     b.ToTable("IntentVtxos", "BTCPayServer.Plugins.Ark");
                 });
 
-            modelBuilder.Entity("NArk.Storage.EfCore.Entities.ArkSwapEntity", b =>
-                {
-                    b.Property<string>("SwapId")
-                        .HasColumnType("text");
-
-                    b.Property<string>("WalletId")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Address")
-                        .HasColumnType("text");
-
-                    b.Property<string>("ContractScript")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<long>("ExpectedAmount")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("FailReason")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Hash")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Invoice")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("MetadataJson")
-                        .HasColumnType("jsonb")
-                        .HasColumnName("Metadata");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("SwapType")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("SwapId", "WalletId");
-
-                    b.HasIndex("WalletId");
-
-                    b.HasIndex("ContractScript", "WalletId");
-
-                    b.ToTable("Swaps", "BTCPayServer.Plugins.Ark");
-                });
-
             modelBuilder.Entity("NArk.Storage.EfCore.Entities.ArkWalletContractEntity", b =>
                 {
                     b.Property<string>("Script")
@@ -257,23 +203,14 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
                     b.Property<string>("FromAssetId")
                         .HasColumnType("text");
 
-                    b.Property<string>("Invoice")
-                        .HasColumnType("text");
-
-                    b.Property<string>("MakerDescriptor")
+                    b.Property<string>("Metadata")
+                        .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<long>("OfferAmount")
                         .HasColumnType("bigint");
 
-                    b.Property<string>("OfferHex")
-                        .IsRequired()
-                        .HasColumnType("text");
-
                     b.Property<string>("PaymentHash")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Preimage")
                         .HasColumnType("text");
 
                     b.Property<long?>("RefundLocktime")
@@ -282,8 +219,10 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
                     b.Property<string>("SpentTxid")
                         .HasColumnType("text");
 
-                    b.Property<int>("Status")
-                        .HasColumnType("integer");
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
 
                     b.Property<string>("SwapAddress")
                         .IsRequired()
@@ -296,8 +235,10 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
                     b.Property<string>("ToAssetId")
                         .HasColumnType("text");
 
-                    b.Property<int>("Type")
-                        .HasColumnType("integer");
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
 
                     b.Property<string>("WalletId")
                         .IsRequired()
@@ -393,25 +334,6 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
                     b.Navigation("Vtxo");
                 });
 
-            modelBuilder.Entity("NArk.Storage.EfCore.Entities.ArkSwapEntity", b =>
-                {
-                    b.HasOne("NArk.Storage.EfCore.Entities.ArkWalletEntity", "Wallet")
-                        .WithMany("Swaps")
-                        .HasForeignKey("WalletId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("NArk.Storage.EfCore.Entities.ArkWalletContractEntity", "Contract")
-                        .WithMany("Swaps")
-                        .HasForeignKey("ContractScript", "WalletId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Contract");
-
-                    b.Navigation("Wallet");
-                });
-
             modelBuilder.Entity("NArk.Storage.EfCore.Entities.ArkWalletContractEntity", b =>
                 {
                     b.HasOne("NArk.Storage.EfCore.Entities.ArkWalletEntity", "Wallet")
@@ -428,16 +350,9 @@ namespace BTCPayServer.Plugins.ArkPayServer.Data.Migrations
                     b.Navigation("IntentVtxos");
                 });
 
-            modelBuilder.Entity("NArk.Storage.EfCore.Entities.ArkWalletContractEntity", b =>
-                {
-                    b.Navigation("Swaps");
-                });
-
             modelBuilder.Entity("NArk.Storage.EfCore.Entities.ArkWalletEntity", b =>
                 {
                     b.Navigation("Contracts");
-
-                    b.Navigation("Swaps");
                 });
 
             modelBuilder.Entity("NArk.Storage.EfCore.Entities.VtxoEntity", b =>

@@ -14,7 +14,9 @@ public static class ArkadeLinkHelper
     public static string GetTransactionLink(ArkNetworkConfig config, string txId)
     {
         return config.ExplorerUri is not null ? $"{config.ExplorerUri.TrimEnd('/')}/tx/{txId}" : $"{config.ArkUri.TrimEnd('/')}/indexer/v1/tx/{txId}";
-    }    public static string GetCommitmentTransactionLink(ArkNetworkConfig config, string txId)
+    }
+
+    public static string GetCommitmentTransactionLink(ArkNetworkConfig config, string txId)
     {
         return config.ExplorerUri is not null ? $"{config.ExplorerUri.TrimEnd('/')}/tx/{txId}" : $"{config.ArkUri.TrimEnd('/')}/indexer/v1/tcommtmentTx/{txId}";
     }

@@ -44,13 +44,34 @@ jobs:
           node-version: '20'
 
       - name: Start Ark regtest stack (denigiri)
-        # Provides bitcoin (18443), nbxplorer (32838), arkd (7070), boltz,
-        # lnd, fulmine via the NNark regtest submodule's denigiri Node
+        # Provides bitcoin (18443), nbxplorer (32838), arkd (7070), lnd,
+        # fulmine via the NNark regtest submodule's denigiri Node
         # orchestrator (replaces the old nigiri binary + shell scripts).
         # BTCPay's test ServerTester is pointed at the bitcoin/nbxplorer
         # endpoints via TESTS_BTCRPCCONNECTION and TESTS_BTCNBXPLORERURL
         # below; the GHA postgres service container supplies BTCPay's DB.
-        run: node submodules/NNark/regtest/regtest.mjs start --profile boltz,delegate
+        env:
+          # The regtest defaults denominate every arkd delay in BLOCKS (any value
+          # under 512; arkd rejects a mix of the two conventions). The ark CLI then
+          # decides whether a VTXO is spendable from a wall-clock timestamp it
+          # derives from that same number read as SECONDS, so the stock
+          # ARKD_VTXO_TREE_EXPIRY=180 makes the funded CLI wallet unspendable three
+          # minutes after its last batch — "not enough funds" despite a full
+          # balance, and a chain that still has ~180 blocks to go. The build and
+          # Playwright steps below take far longer than that, so by the time the
+          # suite runs, cheat-mode's `ark send` fails, falls back to
+          # boarding + `ark settle`, and that dies with "missing forfeit
+          # transactions" (arkd then bans the script, so retries make it worse).
+          #
+          # Moving every delay above 512 makes them seconds, which is the reading
+          # the CLI already applies: the wallet now stays spendable for two hours.
+          # Safe here because this suite exercises no unilateral-exit timing.
+          ARKD_VTXO_TREE_EXPIRY: "7200"
+          ARKD_UNILATERAL_EXIT_DELAY: "512"
+          ARKD_PUBLIC_UNILATERAL_EXIT_DELAY: "512"
+          ARKD_BOARDING_EXIT_DELAY: "1024"
+          ARKD_CHECKPOINT_EXIT_DELAY: "512"
+        run: node submodules/NNark/regtest/regtest.mjs start --profile delegate
         timeout-minutes: 20
 
       - name: Resolve arkd container name
@@ -121,7 +142,7 @@ jobs:
         # filter once they are; ArkadeLightningCorridorTests documents what it takes. SolverRegistry
         # reaches the public solver registry over the internet, so a slow GitHub Pages or a delisted
         # solver would fail a build for reasons that have nothing to do with the commit.
-        run: dotnet test NArk.E2E.Tests/NArk.E2E.Tests.csproj --no-build --verbosity normal --filter "Category!=LightningCorridors&Category!=SolverRegistry" --logger "console;verbosity=detailed"
+        run: dotnet test --project NArk.E2E.Tests/NArk.E2E.Tests.csproj --no-build --output Detailed --filter-not-trait "Category=LightningCorridors" --filter-not-trait "Category=SolverRegistry"
         timeout-minutes: 20
 
       - name: Collect docker logs on failure

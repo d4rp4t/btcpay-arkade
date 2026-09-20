@@ -54,7 +54,6 @@
                             }
                         </td>
                         <td>
-                        <td>
                             @if (wallet.WalletDestination != null)
                             {
                                 <vc:truncate-center text="@wallet.WalletDestination" classes="truncate-center-id"/>
@@ -107,7 +106,7 @@
                                             <li>All wallet configuration data</li>
                                         </ul>
                                         <div class="alert alert-warning">
-                                            <strong>Note:</strong> The wallet cannot be deleted if it has unspent VTXOs, pending swaps, or pending intents.
+                                            <strong>Note:</strong> The wallet cannot be deleted if it has unspent VTXOs or pending intents.
                                         </div>
                                         <p class="text-muted mb-0">
                                             Make sure you have backed up the private key if needed before deletion.

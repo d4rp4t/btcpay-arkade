@@ -142,7 +142,6 @@
                         <th text-translate="true">Source</th>
                         <th text-translate="true">Status</th>
                         <th text-translate="true">VTXOs</th>
-                        <th text-translate="true">Swaps</th>
                         @if (Model.Debug)
                         {
                             <th text-translate="true">Cache</th>
@@ -204,8 +203,7 @@
                         var hasUnspentVtxos = hasVtxos && vtxos.Any(v => !v.IsSpent());
                         var hasRecoverableVtxos = hasVtxos && vtxos.Any(v => v.CanSpendOffchain(chainTime) || !v.IsSpent());
 
-
-                        var sublistColspan = Model.Debug ? 11 : 9;
+                        var sublistColspan = Model.Debug ? 10 : 8;
 
                         <tr id="contract_@contract.Script.GetHashCode()" class="mass-action-row">
                             <td class="only-for-js align-middle">
@@ -279,12 +277,6 @@
                                 {
                                     <span class="badge text-bg-secondary">@vtxos.Length</span>
                                 }
-                                else
-                                {
-                                    <span class="badge text-bg-light text-muted fw-normal">0</span>
-                                }
-                            </td>
-                            <td class="align-middle">
                                 else
                                 {
                                     <span class="badge text-bg-light text-muted fw-normal">0</span>

@@ -291,10 +291,10 @@
     </div>
 </div>
 
-<!-- Recent Intents + Recent Swaps -->
+<!-- Recent Batches -->
 <div class="row g-4 mb-4">
-    <!-- Recent Intents -->
-    <div class="col-md-6">
+    <!-- Recent Batches -->
+    <div class="col-12">
         <div class="bg-tile rounded p-3 p-sm-4 h-100">
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h2 class="h5 mb-0">Recent Batches</h2>
@@ -529,7 +529,6 @@
                     <p class="mb-3">Are you sure you want to clear the wallet configuration? This action will:</p>
                     <ul>
                         <li>Remove the Arkade payment method from this store</li>
-                        <li>Disable Lightning if enabled via Arkade</li>
                         <li>Not delete any funds or VTXOs (they remain on the network)</li>
                     </ul>
                     @if (Model.SignerAvailable && !string.IsNullOrEmpty(Model.Wallet))

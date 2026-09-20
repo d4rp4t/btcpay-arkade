@@ -13,7 +13,7 @@ public class ArkFeeEstimateData
 
     /// <summary>
     /// Human-readable description of where the fee comes from
-    /// (e.g. "No fee for Arkade transactions", "Batch transaction fee", "0.50% + 200 sats miner fee").
+    /// (e.g. "No fee for Arkade transactions", "Batch transaction fee").
     /// </summary>
     public string? FeeDescription { get; set; }
 

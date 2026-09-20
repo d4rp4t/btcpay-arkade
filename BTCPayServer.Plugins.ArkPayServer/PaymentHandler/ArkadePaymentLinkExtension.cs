@@ -83,20 +83,17 @@ public class ArkadePaymentLinkExtension : IPaymentLinkExtension
         // Add the Lightning invoice when there is one (preferred over LNURL).
         if (ShouldIncludeLightning(prompt).Result)
         {
-            if (ln is not null)
+            builder.WithLightning(ln.Destination);
+        }
+        else if (lnurl is not null && _serviceProvider.GetServices<IPaymentLinkExtension>()
+                     .FirstOrDefault(p => p.PaymentMethodId == lnurl.PaymentMethodId) is { } lnurlLink)
+        {
+            if (lnurlLink.GetPaymentLink(lnurl, urlHelper) is { } link)
             {
-                builder.WithLightning(ln.Destination);
-            }
-            else if (lnurl is not null && _serviceProvider.GetServices<IPaymentLinkExtension>()
-                         .FirstOrDefault(p => p.PaymentMethodId == lnurl.PaymentMethodId) is {} lnurlLink)
-            {
-                if (lnurlLink.GetPaymentLink(lnurl, urlHelper) is { } link)
-                {
-                    builder.WithLightning(link.Replace("lightning:", String.Empty));
-                }
+                builder.WithLightning(link.Replace("lightning:", string.Empty));
             }
         }
-        
+
         return builder.Build();
     }
 

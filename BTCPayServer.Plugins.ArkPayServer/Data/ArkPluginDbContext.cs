@@ -22,5 +22,12 @@ public class ArkPluginDbContext(DbContextOptions<ArkPluginDbContext> options) : 
         {
             opts.Schema = "BTCPayServer.Plugins.Ark";
         });
+
+        // Opt-in since the SDK split Arkade swap persistence into its own package: the core
+        // mappings no longer carry ArkadeSwapIntents, so the table only exists if asked for.
+        modelBuilder.ConfigureArkadeEntities(opts =>
+        {
+            opts.Schema = "BTCPayServer.Plugins.Ark";
+        });
     }
 }

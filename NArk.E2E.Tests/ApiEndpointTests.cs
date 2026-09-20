@@ -63,8 +63,8 @@ public class ApiEndpointTests : PlaywrightBaseTest
     }
 
     /// <summary>
-    /// POST /parse-destination on a random LND BOLT11 invoice should
-    /// return type LightningInvoice and surface the amount.
+    /// POST /parse-destination on a random LND BOLT11 invoice should still classify it as
+    /// LightningInvoice — that classification is what lets the send flow refuse it by name.
     /// </summary>
     [Fact]
     [Trait("Category", "Integration")]
@@ -102,9 +102,8 @@ public class ApiEndpointTests : PlaywrightBaseTest
 
     /// <summary>
     /// POST /parse-destination on a bare BTC address should reject it —
-    /// the /send page only supports off-chain destinations (Ark, LN,
-    /// LNURL, or BIP21 carrying ark=/lightning= params). Chain-swap
-    /// destinations go through a separate flow.
+    /// the /send page only supports off-chain Arkade destinations (a bare
+    /// Arkade address, or a BIP21 carrying ark=).
     /// </summary>
     [Fact]
     [Trait("Category", "Integration")]

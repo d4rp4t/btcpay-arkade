@@ -9,9 +9,9 @@ target **.NET 8**.
   (Razor), controllers, and EF Core (PostgreSQL) persistence; consumes the
   NNark SDK and BTCPayServer's payment pipeline.
 - `submodules/NNark`: the Arkade .NET SDK (GitHub `arkade-os/dotnet-sdk`).
-  Key projects: `NArk.Core` (contracts/scripts, gRPC + REST transport),
-  `NArk.Abstractions` (interfaces/base types), `NArk.Swaps` (Boltz swap
-  providers + management), `NArk.Storage.EfCore` (EF persistence).
+  Key projects: `NArk.Core` (contracts/scripts, gRPC + REST transport,
+  settlement), `NArk.Abstractions` (interfaces/base types),
+  `NArk.Storage.EfCore` (EF persistence).
 - `submodules/btcpayserver`: BTCPayServer source, pulled as a submodule.
 - `NArk.E2E.Tests`: Playwright + BTCPayServer `ServerTester` end-to-end suite.
   Not part of `NArk.sln` (runs in the `e2e` CI workflow, not the `build` one).
@@ -64,8 +64,9 @@ The plugin supports these key flows:
   claiming one the solver funded. Configured under `solver-relay`,
   `solver-pubkey` and `emulator` in `ark.json`; `covclaimd` is optional and adds
   a daemon that can finish a claim while this server is down.
-  Boltz swaps predate this and are no longer created — the old table and its
-  pages remain read-only so existing swaps stay visible and refundable.
+- **Auto-sweep**: a store's balance is forwarded to its configured destination
+  by the SDK's settlement subsystem (`ISettlementConfigProvider` +
+  `DestinationSweepSettlementService`), not by a plugin-owned sweep policy.
 - **Boarding Address Flow**: users enter the Ark system by funding a Taproot
   "boarding address," which is converted into a VTXO with help from the Arkade
   Operator. If the Operator is unresponsive, users can reclaim funds
@@ -79,7 +80,7 @@ by a Miniscript descriptor and an address derivation index.
 ## Ark Concepts
 
 - **VTXOs**: Offchain Bitcoin outputs secured via collaborative (user + operator) and unilateral (timelocked) Taproot paths. These are the basic payment units in Ark.
-- **Contracts**: Payment flows (Ark-native and Boltz) are modeled as Taproot contracts generated from a descriptor and derivation index. Each contract results in a unique payment address.
+- **Contracts**: Payment flows are modeled as Taproot contracts generated from a descriptor and derivation index. Each contract results in a unique payment address.
 - **Boarding Addresses**: Onchain Taproot addresses that act as trust-minimized entry points to Ark. When funded, they allow the plugin to request the Arkade Operator to convert the UTXO into a VTXO.
 - **Commitment Transactions**: Onchain transactions created by the operator that anchor offchain VTXO state into Bitcoin, securing it with Bitcoin-level finality.
 
