@@ -353,6 +353,7 @@ The plugin exposes a store-scoped REST API under `/api/v1/stores/{storeId}/arkad
 - `GET /api/v1/stores/{storeId}/arkade/server-info` — Ark operator info.
 - `GET /api/v1/stores/{storeId}/arkade/status` — overall service status.
 - `GET /api/v1/stores/{storeId}/arkade/lightning-solver` — the Arkade swap solver this store trades Lightning corridors with.
+- `POST /api/v1/stores/{storeId}/arkade/swaps/{swapId}/refresh` — re-read a swap from the chain and claim or refund it if due; reopens one its deadline closed.
 - `POST /api/v1/stores/{storeId}/arkade/sync` — force a VTXO + boarding sync.
 
 ### Send example

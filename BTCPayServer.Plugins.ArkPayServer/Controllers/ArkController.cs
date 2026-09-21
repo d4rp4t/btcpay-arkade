@@ -43,6 +43,7 @@ namespace BTCPayServer.Plugins.ArkPayServer.Controllers;
 [Authorize(AuthenticationSchemes = AuthenticationSchemes.Cookie)]
 public partial class ArkController(
     ArkadeSolverService arkadeSolver,
+    ArkadeSwapRefresher swapRefresher,
     IArkadeIntentStorage? arkadeIntentStorage,
     ArkNetworkConfig arkNetworkConfig,
     ArkLightningSpendKeyService spendKeyService,

@@ -362,6 +362,7 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         services.AddSingleton(sp => new ArkadeSolverSelector(
             solverOptions, registryNetwork, sp.GetService<SolverDiscoveryService>()));
         services.AddSingleton<ArkadeSolverService>();
+        services.AddSingleton<ArkadeSwapRefresher>();
 
         services.AddSingleton<ArkadeLNURLPayRequestFilter>();
         services.AddSingleton<IPluginHookFilter>(sp => sp.GetRequiredService<ArkadeLNURLPayRequestFilter>());

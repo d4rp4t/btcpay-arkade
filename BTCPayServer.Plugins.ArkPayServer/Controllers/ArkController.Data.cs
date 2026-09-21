@@ -143,6 +143,31 @@ public partial class ArkController
         });
     }
 
+    [HttpPost("stores/{storeId}/lightning-swaps/refresh")]
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
+    public async Task<IActionResult> RefreshSwaps(string storeId, string[] selectedItems, CancellationToken cancellationToken)
+    {
+        var (_, config, errorResult) = await ValidateStoreAndConfig(requireOwnedByStore: true);
+        if (errorResult != null) return errorResult;
+
+        if (selectedItems.Length == 0)
+            return RedirectWithError(nameof(Swaps), "No swaps selected.", new { storeId });
+
+        try
+        {
+            var results = await swapRefresher.RefreshAsync(config!.WalletId, selectedItems, cancellationToken);
+            var changed = results.Where(r => r.Before != r.After)
+                .Select(r => $"{r.SwapId[..Math.Min(8, r.SwapId.Length)]}: {r.Before} → {r.After}");
+            var notes = results.Where(r => r.Error is not null)
+                .Select(r => $"{r.SwapId[..Math.Min(8, r.SwapId.Length)]}: {r.Error}");
+            var message = string.Join(" ", new[] { $"Refreshed {results.Count} swap(s)." }.Concat(changed).Concat(notes));
+            return RedirectWithSuccess(nameof(Swaps), message, new { storeId });
+        }
+        catch (Exception ex)
+        {
+            return RedirectWithError(nameof(Swaps), $"Refresh failed: {ex.Message}", new { storeId });
+        }
+    }
 
     [HttpGet("stores/{storeId}/vtxos")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]

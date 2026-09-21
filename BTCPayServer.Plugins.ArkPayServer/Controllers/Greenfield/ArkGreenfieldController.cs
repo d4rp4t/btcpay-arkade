@@ -56,7 +56,8 @@ public partial class ArkGreenfieldController(
     IIntentStorage intentStorage,
     BoardingUtxoSyncService boardingUtxoSyncService,
     IHttpClientFactory httpClientFactory,
-    ArkadeSolverService arkadeSolver) : ControllerBase
+    ArkadeSolverService arkadeSolver,
+    ArkadeSwapRefresher swapRefresher) : ControllerBase
 {
     private string? CurrentStoreId => HttpContext.GetStoreData()?.Id;
 

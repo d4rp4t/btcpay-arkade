@@ -37,4 +37,36 @@ public partial class ArkGreenfieldController
             SolverPubkey = arkadeSolver.SolverPubkey
         });
     }
+
+    [HttpPost("~/api/v1/stores/{storeId}/arkade/swaps/{swapId}/refresh")]
+    [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Greenfield)]
+    public async Task<IActionResult> RefreshSwap(string storeId, string swapId, CancellationToken cancellationToken)
+    {
+        var (config, error) = GetStoreConfig();
+        if (error != null) return error;
+
+        if (!config!.GeneratedByStore)
+            return this.CreateAPIError(403, "not-owned", "Wallet is not owned by this store.");
+
+        try
+        {
+            var results = await swapRefresher.RefreshAsync(config.WalletId, [swapId], cancellationToken);
+            if (results.Count == 0)
+                return this.CreateAPIError(404, "swap-not-found", "No such swap for this store's wallet.");
+
+            var result = results[0];
+            return Ok(new ArkSwapRefreshData
+            {
+                SwapId = result.SwapId,
+                PreviousStatus = result.Before.ToString(),
+                Status = result.After.ToString(),
+                Reopened = result.Reopened,
+                Detail = result.Error,
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return this.CreateAPIError(409, "swaps-not-configured", ex.Message);
+        }
+    }
 }
