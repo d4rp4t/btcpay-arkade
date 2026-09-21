@@ -137,11 +137,18 @@ Arkade network endpoints come from:
 | `solver-relay` | No | The Nostr relay a named solver is reached on. Both sides dial out; neither listens. |
 | `solver-pubkey` | No | A named solver's x-only public key — its identity on the relay. |
 | `covclaimd` | No | A claim daemon a receive swap seals its preimage to, so a claim can finish while this server is down. |
+| `max-fee-bps` | No | The most a solver may charge per swap, in basis points of the amount paid in. Default `100` (1%). |
+| `max-fee-flat-sats` | No | A fixed allowance added on top of `max-fee-bps`, mainly for the L1 miner fee on the onchain corridor. Default `500`. |
 
 `solver-relay` and `solver-pubkey` are only read together: name both to pin one counterparty,
 or leave both out and a solver is chosen per payment from the network's public registry. A
 development stack has to name one — its solver mints a fresh identity per run, so nothing can
 list it.
+
+Every quote is held to that limit, whichever solver it came from. A quote over it is refused
+before anything is funded or handed to a payer: a Lightning invoice is not minted, a payment is
+not made, and checkout drops the onchain swap (offering boarding if it is on). A solver chosen from the
+registry is additionally held to the fee and limits on its own card.
 
 "Configured" here means configured, not connected: both sides of the transport dial out, so the
 first evidence a solver is really there is a quote coming back.

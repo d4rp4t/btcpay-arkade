@@ -142,9 +142,9 @@ public class ArkLightningClient(
         var amountSats = (long)createInvoiceRequest.Amount.ToUnit(LightMoneyUnit.Satoshi);
         var claimRecipient = await solver.ResolveClaimRecipientAsync(cancellation);
 
-        var pending = await solver.WithTransportAsync(amountSats, transport =>
+        var pending = await solver.WithTransportAsync(amountSats, (transport, card) =>
             intents.ReceiveFromLightningAsync(
-                walletId, amountSats, transport, claimRecipient,
+                walletId, amountSats, transport, claimRecipient, card,
                 amountSide: RfqAmountSide.From, cancellationToken: cancellation), cancellation);
 
         var intent = await GetIntentAsync(pending.RfqId, cancellation)
@@ -216,8 +216,8 @@ public class ArkLightningClient(
             // The Lightning leg; understates the trade by the fee, which is fine for picking a solver.
             var amountSats = (long)pr.MinimumAmount.ToUnit(LightMoneyUnit.Satoshi);
 
-            var funded = await solver.WithTransportAsync(amountSats, transport =>
-                intents.SendToLightningAsync(walletId, bolt11, transport, cancellationToken: cancellation),
+            var funded = await solver.WithTransportAsync(amountSats, (transport, card) =>
+                intents.SendToLightningAsync(walletId, bolt11, transport, card, cancellation),
                 cancellation);
 
             var intent = await GetIntentAsync(funded.RfqId, cancellation)

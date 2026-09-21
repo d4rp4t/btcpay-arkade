@@ -4,7 +4,17 @@ using NBitcoin;
 
 namespace BTCPayServer.Plugins.ArkPayServer.Lightning;
 
-public sealed record SolverRendezvous(string Pubkey, Uri Relay, IndexedMarket? Market);
+public sealed record SolverRendezvous(string Pubkey, Uri Relay, IndexedMarket? Market)
+{
+    // A one-market card, so the SDK holds the quote to the terms this market was selected on.
+    public SolverCard? Card => Market is null ? null : new SolverCard
+    {
+        Name = Market.Solver,
+        DiscoveryPubkey = Market.DiscoveryPubkey,
+        Transports = Market.Transports,
+        Markets = [Market],
+    };
+}
 
 /// <summary>Picks the cheapest listed solver for a corridor; a solver named in configuration always wins.</summary>
 public sealed class ArkadeSolverSelector(

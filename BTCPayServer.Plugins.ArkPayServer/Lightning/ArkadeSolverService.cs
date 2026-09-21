@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using NArk.ArkadeIntents.Rfq;
+using NArk.ArkadeIntents.SolverRegistry;
 using NBitcoin;
 
 namespace BTCPayServer.Plugins.ArkPayServer.Lightning;
@@ -31,9 +32,10 @@ public class ArkadeSolverService(
     public string? SolverPubkey => selector.HasExplicitSolver ? options.SolverPubkey : null;
 
     // IRfqTransport is not IDisposable but the Nostr one is; disposing here avoids leaking a relay socket per invoice.
+    // The card is null for a solver named in configuration, which publishes none.
     public Task<T> WithTransportAsync<T>(
         long amountSats,
-        Func<IRfqTransport, Task<T>> negotiate,
+        Func<IRfqTransport, SolverCard?, Task<T>> negotiate,
         CancellationToken cancellationToken = default) =>
         WithTransportAsync(amountSats, ArkadeSolverSelector.LightningCorridor, negotiate, cancellationToken);
 
@@ -41,7 +43,7 @@ public class ArkadeSolverService(
     public async Task<T> WithTransportAsync<T>(
         long amountSats,
         string quoteCorridor,
-        Func<IRfqTransport, Task<T>> negotiate,
+        Func<IRfqTransport, SolverCard?, Task<T>> negotiate,
         CancellationToken cancellationToken = default)
     {
         var rendezvous = await selector.SelectAsync(amountSats, quoteCorridor, cancellationToken)
@@ -50,15 +52,8 @@ public class ArkadeSolverService(
                 "and none is named in the Arkade network configuration. Set solver-relay and " +
                 "solver-pubkey to name one directly.");
 
-        var transport = Open(rendezvous);
-        try
-        {
-            return await negotiate(transport);
-        }
-        finally
-        {
-            (transport as IDisposable)?.Dispose();
-        }
+        using var transport = new FeeCappedRfqTransport(Open(rendezvous), options.MaxFeeOn);
+        return await negotiate(transport, rendezvous.Card);
     }
 
     // The scheme picks the transport; a discovered solver is always reached over a relay.

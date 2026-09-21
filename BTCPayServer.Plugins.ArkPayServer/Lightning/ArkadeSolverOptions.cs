@@ -21,7 +21,21 @@ public class ArkadeSolverOptions
     [JsonPropertyName("emulator")]
     public string? EmulatorUri { get; set; }
 
+    // Applies to every quote, carded or not: a named solver publishes no card, and the SDK's card check
+    // is skipped when the quote's own pair field doesn't resolve.
+    [JsonPropertyName("max-fee-bps")]
+    public int? MaxFeeBps { get; set; }
+
+    [JsonPropertyName("max-fee-flat-sats")]
+    public long? MaxFeeFlatSats { get; set; }
+
+    public const int DefaultMaxFeeBps = 100;
+    public const long DefaultMaxFeeFlatSats = 500;
+
     public bool HasEmulator => !string.IsNullOrWhiteSpace(EmulatorUri);
+
+    public long MaxFeeOn(long depositedSats) =>
+        depositedSats * (MaxFeeBps ?? DefaultMaxFeeBps) / 10_000 + (MaxFeeFlatSats ?? DefaultMaxFeeFlatSats);
 
     // Emulator URIs only satisfy the HasEmulator gate; nothing dials them, since the corridor needs just the
     // co-signer key the SDK pins per network. The gate should check for a pinned key, and these can then go.
@@ -60,6 +74,8 @@ public class ArkadeSolverOptions
             SolverPubkey = Pick(file?.SolverPubkey, preset.SolverPubkey),
             CovclaimdUri = Pick(file?.CovclaimdUri, preset.CovclaimdUri),
             EmulatorUri = Pick(file?.EmulatorUri, preset.EmulatorUri),
+            MaxFeeBps = file?.MaxFeeBps ?? preset.MaxFeeBps,
+            MaxFeeFlatSats = file?.MaxFeeFlatSats ?? preset.MaxFeeFlatSats,
         };
 
     private static string? Pick(string? preferred, string? fallback) =>

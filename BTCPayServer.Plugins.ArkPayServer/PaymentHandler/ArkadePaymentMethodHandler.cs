@@ -176,9 +176,9 @@ public class ArkadePaymentMethodHandler(
             var covclaimd = await solver.ResolveClaimRecipientAsync(timeout.Token);
             return await solver.WithTransportAsync(
                 amountSats, ArkadeSolverSelector.OnchainCorridor,
-                transport => intents.ReceiveFromOnchainAsync(
+                (transport, card) => intents.ReceiveFromOnchainAsync(
                     walletId, amountSats, transport, covclaimd, refundDestination,
-                    amountSide: RfqAmountSide.To,
+                    amountSide: RfqAmountSide.To, solverCard: card,
                     payoutContract: payoutContract, cancellationToken: timeout.Token),
                 timeout.Token);
         }
