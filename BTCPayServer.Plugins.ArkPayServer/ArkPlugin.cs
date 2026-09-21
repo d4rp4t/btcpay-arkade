@@ -346,39 +346,19 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         services.AddUIExtension("dashboard", "/Views/Ark/ArkActivityDashboardWidget.cshtml");
     }
 
-    /// <summary>
-    /// Wires the Arkade intent corridors: the covenant emulator, the intent services, and the
-    /// solver this deployment trades with.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The emulator gates everything. Its key is one of the parameters both corridors' lockup
-    /// scripts commit to, so without an endpoint there is no address to derive and the intent
-    /// services would resolve an <c>IEmulatorProvider</c> that does not exist. A missing solver is
-    /// milder — the corridors register and refuse at the point of use, which is where an operator
-    /// can actually read the reason.
-    /// </para>
-    /// <para>
-    /// Registered unconditionally otherwise, including the LNURL filter: it needs to run precisely
-    /// when the corridors are unavailable, to stop handing out an LNURL nothing can settle.
-    /// </para>
-    /// </remarks>
+    // The emulator gates the intent services (its key is baked into every lockup script); a missing
+    // solver only fails at point of use. The LNURL filter is unconditional: it must run when corridors are dark.
     private static void RegisterArkadeIntentServices(
         IServiceCollection services, PluginServiceCollection pluginServices)
     {
         var solverOptions = GetSolverOptions(pluginServices);
         services.AddSingleton(solverOptions);
 
-        // The registry's name for this chain, or null where it publishes no index — which is the
-        // whole of what decides whether a solver can be discovered rather than named.
         var registryNetwork = ArkadeSolverSelector.RegistryNetworkName(
             DefaultConfiguration.GetNetworkType(
                 pluginServices.BootstrapServices.GetRequiredService<IConfiguration>()));
 
-        // GetService, not GetRequiredService: SolverDiscoveryService arrives with
-        // AddArkadeIntentsServices below, which only runs when an emulator is configured. Without
-        // one the corridors are dark anyway, and the selector should say so rather than fail to
-        // resolve.
+        // GetService: SolverDiscoveryService only exists when an emulator is configured.
         services.AddSingleton(sp => new ArkadeSolverSelector(
             solverOptions, registryNetwork, sp.GetService<SolverDiscoveryService>()));
         services.AddSingleton<ArkadeSolverService>();
@@ -386,9 +366,6 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         services.AddSingleton<ArkadeLNURLPayRequestFilter>();
         services.AddSingleton<IPluginHookFilter>(sp => sp.GetRequiredService<ArkadeLNURLPayRequestFilter>());
 
-        // The "Use Arkade" option on BTCPay's Lightning setup screen. Previously gated on a swap provider being
-        // configured, which made the option vanish rather than explain itself; a store that picks it
-        // without a solver now gets a validation error naming what is missing.
         services.AddUIExtension("ln-payment-method-setup-tabhead", "/Views/Ark/ArkLNSetupTabhead.cshtml");
 
         if (!solverOptions.HasEmulator) return;
@@ -397,35 +374,11 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         services.AddArkadeIntentsServices();
     }
 
-    /// <summary>
-    /// Registers the two services that keep a pre-migration VHTLC drainable.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// All that is left of the pre-corridor era. Nothing creates a VHTLC any more — the Lightning corridor
-    /// negotiates a covenant with an Arkade solver instead — and the SDK dropped its swaps package
-    /// entirely, so the swap rows, its provider client and the swaps page went with it.
-    /// </para>
-    /// <para>
-    /// These two did not, because they are what a VHTLC still holding sats depends on: the policy
-    /// hands those coins to the sweeper, and the transformer opens whichever leaf is available —
-    /// the claim while we hold the preimage, the refund once the chain's clock passes the locktime.
-    /// Dropping them alongside the rest would have stopped that money moving with no error to show
-    /// for it, which is why they were ported into the plugin rather than deleted.
-    /// </para>
-    /// <para>
-    /// Unconditional, and deliberately not gated on any provider configuration. An operator who
-    /// finishes migrating and clears the old settings is doing the obvious thing; that must
-    /// not be what strands their remaining funds.
-    /// </para>
-    /// </remarks>
+    // Nothing creates VHTLCs any more, but these keep one still holding sats drainable (claim with the
+    // preimage, refund past locktime). Unconditional so clearing old provider settings can't strand funds.
     private static void RegisterLegacyVhtlcDrain(IServiceCollection services)
     {
-        // Both live in NArk.Core, still under their old `NArk.Swaps.*` namespaces and marked
-        // obsolete: when the swaps package went, upstream moved these two rather than deleting
-        // them, precisely so a VHTLC still holding sats stays drainable. The obsolete warning is
-        // the intended signal — it marks a path that exists to be emptied, not built on — so it is
-        // suppressed here with that in mind rather than worked around by copying the code.
+        // Obsolete upstream on purpose: this path exists to be emptied, not built on.
 #pragma warning disable CS0612 // Type or member is obsolete
         services.AddSingleton<ISweepPolicy, SwapSweepPolicy>();
         services.AddSingleton<IContractTransformer, VHTLCContractTransformer>();
@@ -473,17 +426,7 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         );
     }
 
-    /// <summary>
-    /// Reads the Arkade intent corridors' endpoints from the same <c>ark.json</c> as the network
-    /// config, falling back to whatever the network's preset knows.
-    /// </summary>
-    /// <remarks>
-    /// A second deserialisation of one file rather than one deserialisation of a merged type: the
-    /// network config is <c>ArkNetworkConfig</c>, which lives in the SDK, and these keys are the
-    /// plugin's own. Reading them separately keeps them out of a type this repo does not own.
-    /// A malformed file is not fatal here — it already failed the network parse above, and throwing
-    /// twice for one typo tells an operator nothing new.
-    /// </remarks>
+    // Read separately from ArkNetworkConfig because these keys are the plugin's, not the SDK's.
     private static ArkadeSolverOptions GetSolverOptions(PluginServiceCollection pluginServices)
     {
         var configuration = pluginServices.BootstrapServices.GetRequiredService<IConfiguration>();

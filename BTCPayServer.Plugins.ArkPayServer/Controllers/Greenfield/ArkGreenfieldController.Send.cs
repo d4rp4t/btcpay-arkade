@@ -105,11 +105,7 @@ public partial class ArkGreenfieldController
                         return this.CreateAPIError("missing-amount",
                             "amountSats is required when estimating a Lightning fee.");
 
-                    // Reported without a figure, deliberately. A corridor's fee is the spread in the
-                    // solver's quote, and obtaining one means opening a negotiation the caller has
-                    // not asked to open. An estimate not derived from a quote would be a number this
-                    // API invented, which is worse for a caller deciding whether to send than an
-                    // acknowledged absence.
+                    // No figure: the fee is the quote's spread, and this call hasn't asked to open a negotiation.
                     response.IsLightning = true;
                     response.FeeDescription = "Swap fee quoted by the solver at send time";
                     return Ok(response);
@@ -352,9 +348,7 @@ public partial class ArkGreenfieldController
             result.LnurlMinSats = (long)info.MinSendable.ToUnit(LightMoneyUnit.Satoshi);
             result.LnurlMaxSats = (long)info.MaxSendable.ToUnit(LightMoneyUnit.Satoshi);
 
-            // The LNURL endpoint's own range stands unnarrowed: an Arkade solver quotes its terms per
-            // request, so an amount it will not take is refused at quoting time with its own reason
-            // rather than excluded from a range computed in advance.
+            // Unnarrowed: the solver refuses an amount at quoting time, with its reason.
 
             result.AmountSats = amountBtc.HasValue ? (long)(amountBtc.Value * 100_000_000m) : 0L;
             result.IsValid = true;

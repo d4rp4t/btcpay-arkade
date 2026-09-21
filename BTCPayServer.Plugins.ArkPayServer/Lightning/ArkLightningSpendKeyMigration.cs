@@ -10,14 +10,8 @@ using Microsoft.Extensions.Logging;
 namespace BTCPayServer.Plugins.ArkPayServer.Lightning;
 
 /// <summary>
-/// Backfills the spend capability into Arkade Lightning connection strings written before
-/// capabilities existed, so stores configured earlier keep working.
-///
-/// A store is backfilled only when it owns the wallet it is configured against. Stores
-/// configured against a wallet they do not own are left receive-only.
-///
-/// Runs in the background rather than in <c>StartAsync</c> so a slow or failing pass never
-/// blocks host startup.
+/// Backfills the spend capability into pre-capability connection strings, only for stores that own the wallet.
+/// Runs in the background so a slow pass never blocks host startup.
 /// </summary>
 public class ArkLightningSpendKeyMigration(
     StoreRepository storeRepository,

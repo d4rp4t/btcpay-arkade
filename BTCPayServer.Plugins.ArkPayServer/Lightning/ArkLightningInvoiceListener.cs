@@ -7,16 +7,7 @@ using NBitcoin;
 
 namespace BTCPayServer.Plugins.ArkPayServer.Lightning;
 
-/// <summary>
-/// Tells BTCPay when a Lightning invoice this wallet handed out has actually been received.
-/// </summary>
-/// <remarks>
-/// The signal is the swap reaching <see cref="ArkadeSwapIntentStatus.Fulfilled"/> — the claim spend
-/// landing on Arkade — and not the payer's payment, which on this corridor happens first and settles
-/// nothing on its own. The solver mints a hold invoice, funds Arkade against it, and only our claim
-/// publishes the preimage that releases the payer's HTLC. An earlier signal would mark an order paid
-/// while the money still sat in a covenant with a closing window.
-/// </remarks>
+// Signals on Fulfilled (our claim landing), not on the payer's payment: that is a hold only our claim releases.
 public class ArkLightningInvoiceListener : ILightningInvoiceListener
 {
     private readonly string _walletId;
@@ -56,9 +47,7 @@ public class ArkLightningInvoiceListener : ILightningInvoiceListener
             if (intent.Status != ArkadeSwapIntentStatus.Fulfilled)
                 return;
 
-            // Mapped rather than trusted: the same status rule that decides an invoice is paid lives
-            // in one place, so this cannot drift into announcing a payment BTCPay would not agree is
-            // one. A swap without an invoice is not one we handed out.
+            // Via the mapper so the paid rule lives in one place; a swap without an invoice isn't ours.
             if (ArkadeIntentLightningMapper.ToInvoice(intent, _network) is not
                 { Status: LightningInvoiceStatus.Paid } invoice)
                 return;

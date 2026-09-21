@@ -4,27 +4,12 @@ using NBitcoin;
 
 namespace BTCPayServer.Plugins.ArkPayServer.Lightning;
 
-/// <summary>
-/// Turns an Arkade swap intent into the invoice or payment BTCPay reasons about.
-/// </summary>
-/// <remarks>
-/// The whole of this corridor's meaning for BTCPay is in these two mappings, because BTCPay decides
-/// whether an order is settled from the status alone. The rule below is deliberately conservative in
-/// one direction and not the other: an invoice counts as paid only once the swap is
-/// <see cref="ArkadeSwapIntentStatus.Fulfilled"/>, never merely funded. Calling a funded-but-unclaimed
-/// swap paid would mark an order settled while the money still sits in a script we have not spent,
-/// on a clock, with the counterparty's own reclaim path opening at the end of it.
-/// </remarks>
+// Paid only once Fulfilled, never merely funded: a funded-but-unclaimed swap is still on a clock with the
+// solver's reclaim path opening at the end of it.
 public static class ArkadeIntentLightningMapper
 {
-    /// <summary>Map a receive swap to the invoice BTCPay handed out.</summary>
-    /// <param name="intent">The swap, which must be a Lightning receive.</param>
-    /// <param name="network">The network its invoice was minted on.</param>
-    /// <returns>The invoice, or <c>null</c> when the swap carries none.</returns>
     public static LightningInvoice? ToInvoice(ArkadeSwapIntent intent, Network network)
     {
-        // Both moved off the row and into the metadata bag when the SDK generalised the intent
-        // across corridors: a Lightning invoice means nothing to an asset or onchain swap.
         var lightning = intent.LightningMetadata();
         if (lightning.Invoice is not { Length: > 0 } bolt11)
         {
@@ -36,15 +21,12 @@ public static class ArkadeIntentLightningMapper
         {
             ArkadeSwapIntentStatus.Fulfilled => LightningInvoiceStatus.Paid,
 
-            // The solver's reclaim window is open or the swap ended without us taking delivery.
             ArkadeSwapIntentStatus.Cancelled
                 or ArkadeSwapIntentStatus.Recoverable
                 or ArkadeSwapIntentStatus.Refundable
                 or ArkadeSwapIntentStatus.Resolved => LightningInvoiceStatus.Expired,
 
-            // Funding, Pending, Claimable, Cancelling. Claimable is the interesting one: the solver
-            // has funded and the money is ours to take, but until the claim lands nothing has been
-            // received — and the payer's own invoice is a hold that only our claim settles.
+            // Claimable included: nothing is received until our claim lands, which also settles the payer's hold.
             _ => LightningInvoiceStatus.Unpaid,
         };
 
@@ -61,20 +43,13 @@ public static class ArkadeIntentLightningMapper
         };
     }
 
-    /// <summary>Map a send swap to the payment BTCPay is waiting on.</summary>
-    /// <param name="intent">The swap, which must be a Lightning send.</param>
-    /// <param name="network">The network its invoice belongs to.</param>
-    /// <returns>The payment.</returns>
     public static LightningPayment ToPayment(ArkadeSwapIntent intent, Network network)
     {
         var status = intent.Status switch
         {
             ArkadeSwapIntentStatus.Fulfilled => LightningPaymentStatus.Complete,
 
-            // Refundable means the locktime passed with nobody filling: the payment did not happen and
-            // the deposit is ours to take back. Resolved is the ambiguous end — spent past the
-            // locktime, by a fill or by a refund, and only the witness says which. Neither is a
-            // payment BTCPay should keep waiting on.
+            // Resolved is spent past locktime by a fill or a refund; either way BTCPay should stop waiting.
             ArkadeSwapIntentStatus.Refundable
                 or ArkadeSwapIntentStatus.Cancelled
                 or ArkadeSwapIntentStatus.Recoverable
@@ -96,7 +71,6 @@ public static class ArkadeIntentLightningMapper
             CreatedAt = intent.CreatedAt,
             Amount = amount,
             AmountSent = locked,
-            // The corridor's fee is the spread, and there is no separate field to read it from.
             Fee = locked - amount,
         };
     }

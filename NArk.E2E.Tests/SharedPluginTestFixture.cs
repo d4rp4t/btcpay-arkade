@@ -39,10 +39,8 @@ public class SharedPluginTestFixture : IDisposable
         var testDir = Path.Combine(Directory.GetCurrentDirectory(), "ArkadePluginTests");
         ServerTester = testInstance.CreateServerTester(testDir, newDb: true);
 
-        // After the tester is constructed and before it starts, which is the only window there is:
-        // its constructor deletes the scope directory outright, and StartAsync is what reads the
-        // config. The plugin looks in BTCPay's --datadir, which is the "pay" subdirectory of the
-        // scope rather than the scope itself.
+        // Only window: the constructor wipes the scope dir and StartAsync reads config. The plugin reads
+        // BTCPay's --datadir, the scope's "pay" subdirectory.
         WriteSolverConfigIfRequested(Path.Combine(testDir, "pay"));
         // Load plugins in an isolated AssemblyLoadContext — matches the
         // production load model AND matches rockstardev's reference
@@ -66,24 +64,7 @@ public class SharedPluginTestFixture : IDisposable
         }
     }
 
-    /// <summary>
-    /// Points the plugin at a locally-run Arkade swap solver, when one was asked for.
-    /// </summary>
-    /// <param name="dataDir">BTCPay's data directory for this run — where the plugin reads its config.</param>
-    /// <remarks>
-    /// <para>
-    /// Written as <c>ark.json</c> in the data directory because that is where the plugin actually
-    /// reads it from in production; configuring it any other way here would test a path no
-    /// deployment uses. Only the keys the corridors need are written — the plugin merges a partial
-    /// file over its per-network preset, so the operator endpoints keep the regtest defaults.
-    /// </para>
-    /// <para>
-    /// Gated on <see cref="SolverUrlVariable"/> being set, and so a no-op for the rest of the suite.
-    /// The corridors need a solver, a claim daemon and a covenant emulator running alongside the
-    /// regtest stack, none of which CI starts — see <c>ArkadeLightningCorridorTests</c> for how to
-    /// bring them up.
-    /// </para>
-    /// </remarks>
+    // Written as ark.json in the datadir, the path production reads; a no-op unless SolverUrlVariable is set.
     private static void WriteSolverConfigIfRequested(string dataDir)
     {
         var solverUrl = Environment.GetEnvironmentVariable(SolverUrlVariable);
@@ -91,8 +72,6 @@ public class SharedPluginTestFixture : IDisposable
 
         Directory.CreateDirectory(dataDir);
 
-        // An http(s) endpoint selects the HTTP transport; a ws(s) one selects the relay, which then
-        // also needs the solver's key to address it on. Both are passed through as given.
         var config = new Dictionary<string, string?>
         {
             ["solver-relay"] = solverUrl,
@@ -110,10 +89,6 @@ public class SharedPluginTestFixture : IDisposable
         File.WriteAllText(Path.Combine(dataDir, "ark.json"), json);
     }
 
-    /// <summary>
-    /// The environment variable naming the solver to trade with. Unset means the Lightning-corridor
-    /// tests do not run.
-    /// </summary>
     public const string SolverUrlVariable = "ARKADE_E2E_SOLVER_URL";
 
     public void Dispose()

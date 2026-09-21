@@ -330,10 +330,7 @@ public partial class ArkController
                 var dest = request.Outputs[0].Destination?.Trim() ?? "";
                 if (IsLightningDestination(dest))
                 {
-                    // A corridor's fee is the spread in the solver's quote, and there is no way to
-                    // learn it short of opening a negotiation — which this endpoint is called on
-                    // every amount change and must not do. So the shape is reported without a
-                    // number, rather than a number that was not quoted.
+                    // No figure: the fee is the quote's spread, and this endpoint runs on every amount change.
                     if (arkadeSolver.IsConfigured)
                     {
                         response.IsLightning = true;

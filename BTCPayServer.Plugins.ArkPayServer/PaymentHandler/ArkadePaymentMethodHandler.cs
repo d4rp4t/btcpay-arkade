@@ -77,10 +77,7 @@ public class ArkadePaymentMethodHandler(
         var hasOnchain = context.InvoiceEntity.GetPaymentPrompt(PaymentTypes.CHAIN.GetPaymentMethodId("BTC")) is not null;
         var wallet = await walletStorage.GetWalletById(arkadePaymentMethodConfig.WalletId);
         var amountSats = Money.Coins(context.Prompt.Calculate().Due).Satoshi;
-        // Derived whenever EITHER onchain path is on, because the swap needs it too — not as a
-        // method it offers, but as where its L1 refund goes. Sending that refund to an address
-        // BTCPay never associated with this invoice would leave the merchant paid and the invoice
-        // open, so the sink has to be an address registered here, at prompt time.
+        // Also derived for the swap: its L1 refund must land on an address registered with this invoice.
         var wantsBoarding = arkadePaymentMethodConfig.BoardingEnabled
             || arkadePaymentMethodConfig.OnchainSwapEnabled;
         if (wantsBoarding &&
@@ -104,8 +101,6 @@ public class ArkadePaymentMethodHandler(
                         : Network.RegTest;
                 var boardingAddress = boardingContract.GetOnchainAddress(network);
 
-                // Tracked whichever path is taken: on the swap path this is where the refund lands,
-                // and BTCPay credits a payment to an invoice by the destinations registered here.
                 context.TrackedDestinations.Add(boardingAddress.ToString());
                 context.TrackedDestinations.Add(boardingContract.GetScriptPubKey().ToHex());
 
@@ -114,22 +109,9 @@ public class ArkadePaymentMethodHandler(
                         arkadePaymentMethodConfig.WalletId, amountSats, boardingAddress, contract)
                     : null;
 
-                // Imported after the negotiation, because the Source tag depends on which role this
-                // contract ends up in, and the two roles have opposite lifetimes.
-                //
-                // As an offered method it belongs to the invoice: `ToggleArkadeContract` deactivates
-                // every contract tagged `invoice:{id}` once the invoice stops being New, which is
-                // right — nobody should be paying it after that.
-                //
-                // As a swap's refund sink it has to OUTLIVE the invoice. The refund cannot be pushed
-                // until the L1 locktime, hours later and long after the invoice expired, and a
-                // contract deactivated by then is a script nobody is watching when the money finally
-                // lands on it. That is a silent loss, so the tag is deliberately one the invoice
-                // sweep does not match.
-                // Only when it will actually be used: as the swap's refund sink, or as a method this
-                // store offers. With boarding switched off and a swap that could not be negotiated,
-                // it is neither — importing it anyway would leave a contract nothing pays and the
-                // sync service still watches.
+                // An invoice-tagged contract is deactivated once the invoice leaves New, but the swap's
+                // refund lands hours later at the L1 locktime; the swap-refund tag keeps it watched.
+                // Skipped entirely when neither boarding nor a swap will use it.
                 var boardingSource = swap is not null
                     ? $"swap-refund:{swap.RfqId}"
                     : arkadePaymentMethodConfig.BoardingEnabled
@@ -150,22 +132,14 @@ public class ArkadePaymentMethodHandler(
 
                 if (swap is not null)
                 {
-                    // The swap replaces boarding rather than joining it. Both are onchain addresses
-                    // and they want different amounts — offering the pair invites a payer to split a
-                    // payment between them, which funds neither.
+                    // Replaces boarding: two onchain addresses with different amounts invite a split payment.
                     details = details with
                     {
                         SwapHtlcAddress = swap.HtlcAddress,
                         SwapFundAmountSats = swap.FundAmountSats,
                         SwapId = swap.RfqId,
                     };
-                    // Registered so the invoice can be found from the address a payer was shown —
-                    // a support question, a webhook, a manual reconciliation. It credits NOTHING on
-                    // its own: crediting runs off VTXO events, and nothing imports the L1 HTLC as a
-                    // contract, so no event ever names this script. That is the intended shape
-                    // rather than an omission. The swap is not the merchant's money while it sits in
-                    // the HTLC — it becomes theirs when the claim lands on the prompt's own address,
-                    // which is the destination registered above, and that is the one credit.
+                    // For lookup only; it credits nothing. Crediting happens when the claim lands on the prompt's address.
                     context.TrackedDestinations.Add(swap.HtlcAddress);
                 }
                 else if (arkadePaymentMethodConfig.BoardingEnabled)
@@ -181,57 +155,10 @@ public class ArkadePaymentMethodHandler(
         context.Prompt.Details = JObject.FromObject(details, Serializer);
     }
 
-    /// <summary>
-    /// Negotiate the fast onchain path, or return <c>null</c> to fall back to boarding.
-    /// </summary>
-    /// <param name="walletId">The store's wallet.</param>
-    /// <param name="amountSats">What the invoice is due.</param>
-    /// <param name="refundDestination">
-    /// Where the L1 refund goes if the swap never settles — this invoice's own boarding address, so
-    /// a failed swap degrades into the slow path rather than into a reconciliation problem.
-    /// </param>
-    /// <param name="payoutContract">
-    /// The contract this invoice already derived, reused as the swap's payout. Load-bearing — see
-    /// the remarks before changing it.
-    /// </param>
-    /// <returns>The negotiated on-board, or <c>null</c> when this path is not available.</returns>
-    /// <remarks>
-    /// <para>
-    /// Every failure here returns <c>null</c> rather than throwing. A solver that is unlisted, slow,
-    /// unreachable or simply unwilling to quote is a reason to offer the slower path, not a reason
-    /// the merchant cannot be paid — and this runs while a customer is waiting for a checkout page.
-    /// </para>
-    /// <para>
-    /// The corridor is asked for by name: a solver listed for Lightning is not thereby listed for
-    /// onchain.
-    /// </para>
-    /// <para>
-    /// Exact-OUT, unlike the Lightning leg beside it, and the difference is not a preference. What
-    /// credits an invoice here is the VTXO that lands, so pinning the L1 side instead would have the
-    /// solver's fee come out of what the merchant receives and leave every such invoice underpaid by
-    /// it. Lightning credits the BOLT11 amount rather than what lands, so pinning the payer's side
-    /// there is right for the same reason it is wrong here. Exact-out also cannot be refused for
-    /// <c>fee_consumes_swap</c> — the payer's figure is solved up from the payout, so the fee has
-    /// nothing to eat.
-    /// </para>
-    /// <para>
-    /// The payout is this invoice's own contract, and here that is a correctness requirement rather
-    /// than the tidiness it is at the SDK layer. What credits an invoice is
-    /// <see cref="ArkContractInvoiceListener"/> matching an arriving VTXO's address against
-    /// <c>TrackedDestinations</c>, and the only Arkade address registered there is the prompt's own.
-    /// A freshly derived payout is registered nowhere: the claim would succeed, the sats would be in
-    /// the wallet, and the invoice would sit unpaid with nothing in the logs to say why. So passing
-    /// the prompt's contract is what connects the corridor to the invoice at all.
-    /// </para>
-    /// <para>
-    /// It also happens to cost no HD index, which is worth keeping: an HD wallet is restored by
-    /// scanning until `GapLimit` consecutive indices come back unused, and an invoice that is never
-    /// paid leaves whatever it derived behind, so deriving twice per invoice reaches that limit at
-    /// twice the rate and what lies past it a seed restore does not find. The cost of sharing is
-    /// that one key appears in three contracts for one payment, which links them; they are one
-    /// payment, so the link exists regardless.
-    /// </para>
-    /// </remarks>
+    // Returns null on any failure: a missing or unwilling solver means offering boarding, not failing checkout.
+    // Exact-OUT because invoices are credited by the VTXO that lands; exact-in would underpay by the fee.
+    // The payout must be the prompt's contract: ArkContractInvoiceListener only credits addresses in
+    // TrackedDestinations, so a fresh one would be claimed but leave the invoice unpaid. It also saves an HD index.
     private async Task<PendingOnchainReceive?> NegotiateOnchainSwapAsync(
         string walletId, long amountSats, BitcoinAddress refundDestination, ArkContract payoutContract)
     {

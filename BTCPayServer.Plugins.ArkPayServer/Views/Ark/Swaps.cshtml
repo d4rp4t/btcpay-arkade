@@ -7,9 +7,7 @@
     ViewData.SetActivePage(category: "Ark", activePage: "Swaps", title: "Arkade - Swaps");
     var storeId = ScopeProvider.GetCurrentStoreId();
 
-    // Status carries the only thing a merchant needs at a glance: whether this swap still wants
-    // something from them. Claimable and Refundable do; the rest are either waiting on someone else
-    // or over.
+    // Claimable and Refundable are the statuses that still want something from the merchant.
     string Badge(ArkadeSwapIntentStatus s) => s switch
     {
         ArkadeSwapIntentStatus.Fulfilled => "text-bg-success",
@@ -19,10 +17,7 @@
         _ => "text-bg-info"
     };
 
-    // Which way the money moved, for every corridor rather than for Lightning alone. Reading a
-    // single type as "received" and everything else as "sent" was right while Lightning was the
-    // only corridor; an on-board is money coming IN, and showing it as sent is the kind of wrong a
-    // merchant reconciles against.
+    // Per corridor: an on-board is incoming too, not just Lightning receives.
     bool Received(ArkadeSwapIntentType t) =>
         t is ArkadeSwapIntentType.LightningToBtc
             or ArkadeSwapIntentType.OnchainToBtc
@@ -30,8 +25,6 @@
 
     string Direction(ArkadeSwapIntentType t) => Received(t) ? "Received" : "Sent";
 
-    // The rail it settled on. Both legs of every corridor here are bitcoin except the asset ones,
-    // so without this two rows can look identical while being different swaps entirely.
     string Rail(ArkadeSwapIntentType t) => t switch
     {
         ArkadeSwapIntentType.BtcToLightning or ArkadeSwapIntentType.LightningToBtc => "Lightning",
@@ -85,9 +78,6 @@ else
             {
                 var received = Received(swap.Type);
 
-                @* The spread, and which side of it the merchant sees. Sending, we lock more than the
-                   invoice is for; receiving, we are credited less than the payer was billed. Either
-                   way the difference is what the corridor cost. *@
                 var billed = received ? swap.OfferAmount : swap.WantAmount;
                 var landed = received ? swap.WantAmount : swap.OfferAmount;
                 var fee = received ? billed - landed : landed - billed;
@@ -107,9 +97,7 @@ else
                         }
                         else
                         {
-                            @* Rows written before the solver was recorded. Blank rather than a guess:
-                               the counterparty is chosen per payment, so configuration cannot say
-                               which one this was. *@
+                            @* Pre-dates solver recording; config can't say which per-payment solver it was. *@
                             <span class="text-secondary">&mdash;</span>
                         }
                     </td>

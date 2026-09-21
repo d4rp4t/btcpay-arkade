@@ -300,9 +300,7 @@ public partial class ArkController
         {
             var on = command == "enable-onchain-swap";
 
-            // Boarding is not optional underneath a swap: it is where the L1 refund goes when the
-            // solver never delivers, so switching the swap on switches it on too. Without it a
-            // failed swap has nowhere to return to that this invoice is watching.
+            // The swap's L1 refund lands on the boarding address, so the swap requires boarding.
             var newConfig = config! with
             {
                 OnchainSwapEnabled = on,
@@ -319,8 +317,6 @@ public partial class ArkController
 
         if (command == "disable-boarding")
         {
-            // Turning boarding off takes the swap with it: the swap's refund lands on the
-            // boarding address, so leaving it on without one strands a failed swap's money.
             var newConfig = config! with { BoardingEnabled = false, OnchainSwapEnabled = false };
             store!.SetPaymentMethodConfig(paymentMethodHandlerDictionary[ArkadePlugin.ArkadePaymentMethodId], newConfig);
             await storeRepository.UpdateStore(store);

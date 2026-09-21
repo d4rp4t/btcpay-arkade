@@ -358,10 +358,7 @@ public partial class ArkController
                 result.LnurlMinSats = (long)info.MinSendable.ToUnit(LightMoneyUnit.Satoshi);
                 result.LnurlMaxSats = (long)info.MaxSendable.ToUnit(LightMoneyUnit.Satoshi);
 
-                // The LNURL endpoint's own range is the whole range now. What this
-                // replaced narrowed it to published swap limits; an Arkade solver quotes its terms per
-                // request, so an amount it will not take is refused at quoting time with its own
-                // reason rather than excluded from a range guessed at beforehand.
+                // Unnarrowed: the solver refuses an amount at quoting time, with its reason.
 
                 var amountSats = amountBtc.HasValue ? (long)(amountBtc.Value * 100_000_000m) : 0L;
                 result.AmountSats = amountSats;
@@ -428,10 +425,7 @@ public partial class ArkController
                 }
                 else if (dest.Type is Send2DestinationType.LightningInvoice or Send2DestinationType.Bip21Lightning or Send2DestinationType.Lnurl)
                 {
-                    // No estimate, deliberately. A corridor's fee is the spread in the solver's quote,
-                    // and learning it means opening a negotiation the merchant has not agreed to yet.
-                    // Showing a number here would mean either quoting speculatively on every keystroke
-                    // or inventing a figure, and an invented swap fee is worse than an absent one.
+                    // No estimate: the fee is the quote's spread, and quoting per keystroke isn't acceptable.
                     dest.FeeDescription = "Swap fee quoted by the solver at send time";
                 }
             }

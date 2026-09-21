@@ -16,23 +16,9 @@ using NodeInfo = BTCPayServer.Lightning.NodeInfo;
 namespace BTCPayServer.Plugins.ArkPayServer.Lightning;
 
 /// <summary>
-/// An Arkade wallet presented to BTCPay as a Lightning node, with the corridors run by an Arkade
-/// swap solver.
+/// An Arkade wallet presented to BTCPay as a Lightning node: each payment is a covenant plus a solver
+/// taking the other side. Reads work without a solver, so recorded swaps stay visible when it is gone.
 /// </summary>
-/// <remarks>
-/// <para>
-/// There is no node here and no channels — a Lightning payment in either direction is an Arkade
-/// covenant plus a solver willing to take the other side of it. Everything BTCPay asks that depends
-/// on actually being a node is unsupported, and the rest is a swap intent wearing an invoice's
-/// clothes.
-/// </para>
-/// <para>
-/// The solver is a hard dependency of both corridors and it is optional configuration, so most of
-/// what follows starts by asserting it exists. Reading is exempt: a swap already recorded is
-/// readable whether or not the solver that made it is still reachable, which matters most when it
-/// is not.
-/// </para>
-/// </remarks>
 public class ArkLightningClient(
     IClientTransport clientTransport,
     Network network,
@@ -67,14 +53,7 @@ public class ArkLightningClient(
             "This store is not authorised to spend from the configured Arkade wallet.");
     }
 
-    /// <summary>
-    /// The reason this client cannot do anything, or <c>null</c> when it can.
-    /// </summary>
-    /// <remarks>
-    /// The corridors are only registered when an emulator endpoint is configured, because its key is
-    /// a parameter of every lockup script — so without one the intent services are genuinely absent
-    /// from the container rather than merely idle.
-    /// </remarks>
+    // Without an emulator the corridor services are absent from the container, not merely idle.
     private string? Unavailable =>
         intents is null || solver is null || intentStorage is null
             ? "The Arkade Lightning corridors are not configured. Set 'emulator' in the Arkade " +
@@ -113,10 +92,7 @@ public class ArkLightningClient(
 
     public async Task<LightningInvoice?> GetInvoice(uint256 paymentHash, CancellationToken cancellation = default)
     {
-        // Filtered here because IArkadeIntentStorage takes no payment-hash filter — the column is
-        // indexed, but the abstraction offers no way to reach the index. A merchant's swap set is
-        // small and this is off the checkout path, so the scan is worth less than widening the SDK's
-        // interface for one caller.
+        // IArkadeIntentStorage has no payment-hash filter; a merchant's swap set is small enough to scan.
         var hash = paymentHash.ToString();
         var intents = await GetIntentsAsync(ArkadeSwapIntentType.LightningToBtc, cancellation);
         var match = intents.FirstOrDefault(i =>
@@ -147,29 +123,9 @@ public class ArkLightningClient(
         LightMoney amount, string description, TimeSpan expiry, CancellationToken cancellation = default) =>
         CreateInvoice(new CreateInvoiceParams(amount, description, expiry), cancellation);
 
-    /// <summary>Ask the solver to mint an invoice whose settlement pays this wallet on Arkade.</summary>
-    /// <param name="createInvoiceRequest">What BTCPay wants received.</param>
-    /// <param name="cancellation">Cancels the negotiation.</param>
-    /// <returns>The invoice to hand the payer.</returns>
-    /// <remarks>
-    /// <para>
-    /// The requested amount is what the <em>payer is billed</em>: the invoice is minted for exactly
-    /// what BTCPay asked for, and the solver's spread comes out of what lands on Arkade. The store
-    /// therefore nets the order amount minus the swap fee, the same way it nets a card sale minus
-    /// the processor's cut.
-    /// </para>
-    /// <para>
-    /// The other direction is a real option — <c>RfqAmountSide.To</c> pins the payout instead and
-    /// bills the payer the difference — and it is the wrong one here. An invoice for more than the
-    /// amount a customer approved is one a LUD-06 wallet refuses outright, so the sale is simply
-    /// lost; on a checkout that skips that check the customer is silently overcharged instead.
-    /// Neither is a trade a merchant would accept to avoid a fee it can price into the order.
-    /// </para>
-    /// <para>
-    /// The description and expiry BTCPay passes are dropped, because the solver mints the invoice and
-    /// nothing in the RFQ request carries either. Its own expiry is what bounds the swap.
-    /// </para>
-    /// </remarks>
+    // Exact-in (RfqAmountSide.From): the payer is billed the requested amount and the fee comes out of
+    // what lands. Exact-out would mint an invoice above what the customer approved, which LUD-06 wallets refuse.
+    // BTCPay's description and expiry are dropped; the solver mints the invoice and the RFQ carries neither.
     public async Task<LightningInvoice> CreateInvoice(
         CreateInvoiceParams createInvoiceRequest, CancellationToken cancellation = default)
     {
@@ -241,17 +197,7 @@ public class ArkLightningClient(
     public Task<PayResponse> Pay(string bolt11, CancellationToken cancellation = default) =>
         Pay(bolt11, new PayInvoiceParams(), cancellation);
 
-    /// <summary>Pay a BOLT11 by locking sats into a covenant only the solver can claim.</summary>
-    /// <param name="bolt11">The invoice to pay.</param>
-    /// <param name="payParams">Ignored — the corridor's route is the solver.</param>
-    /// <param name="cancellation">Cancels before funding; after funding the swap is live regardless.</param>
-    /// <returns>The payment, which is <see cref="LightningPaymentStatus.Pending"/> on success.</returns>
-    /// <remarks>
-    /// Returns pending rather than complete, always. Funding the lockup is the whole of what this
-    /// call does; the solver then pays the invoice and takes the lockup with the preimage, and only
-    /// that spend — observed by the monitor — settles the payment. Reporting complete at the point
-    /// of funding would call every payment successful, including the ones that end in a refund.
-    /// </remarks>
+    // Always pending: funding the lockup is all this does, and a refund must not be reported as success.
     public async Task<PayResponse> Pay(
         string bolt11, PayInvoiceParams payParams, CancellationToken cancellation = default)
     {
@@ -267,9 +213,7 @@ public class ArkLightningClient(
             var (intents, solver, _) = Corridors;
             var pr = BOLT11PaymentRequest.Parse(bolt11, network);
 
-            // The invoice amount, which is the Lightning leg. The Arkade leg is that plus the
-            // solver's fee, so this understates the trade by the fee — close enough to pick a solver
-            // by, and the quote is what settles the exact figure anyway.
+            // The Lightning leg; understates the trade by the fee, which is fine for picking a solver.
             var amountSats = (long)pr.MinimumAmount.ToUnit(LightMoneyUnit.Satoshi);
 
             var funded = await solver.WithTransportAsync(amountSats, transport =>

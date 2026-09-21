@@ -83,13 +83,7 @@ public partial class ArkController(
     private static readonly TimeSpan PostOpVtxoPollBuffer = TimeSpan.FromMinutes(5);
     private static DateTimeOffset PostOpVtxoPollSince() => DateTimeOffset.UtcNow - PostOpVtxoPollBuffer;
 
-    /// <summary>
-    /// Returns the wallet's Lightning connection string, including its spend capability, so
-    /// the owner can add the same wallet to another store they control.
-    ///
-    /// Gated on <c>requireOwnedByStore</c>: only a store with spend rights over the wallet
-    /// may read the capability.
-    /// </summary>
+    // Gated on requireOwnedByStore: only a store with spend rights may read the capability.
     [HttpGet("stores/{storeId}/ln-connection-string")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> LightningConnectionString(string storeId)
@@ -104,10 +98,6 @@ public partial class ArkController(
         });
     }
 
-    /// <summary>
-    /// Issues a fresh spend capability for the wallet. Connection strings previously shared
-    /// with other stores stop authorising spends and must be re-copied.
-    /// </summary>
     [HttpPost("stores/{storeId}/regenerate-ln-spend-key")]
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> RegenerateLightningSpendKey(string storeId)
@@ -139,9 +129,7 @@ public partial class ArkController(
     /// thread (a gap-limit scan polls arkd per index), tracking status for the overview.
     /// Discovers contracts (incl. legacy deprecated-signer scripts) + the derivation
     /// index, finalizes pending txs and resyncs offchain funds, then syncs boarding
-    /// (on-chain) UTXOs. <c>IWalletRecoveryService</c> now comes from NArk.Core and is always
-    /// registered — it used to arrive with the swaps package, so recovery silently degraded to a
-    /// boarding-only sync for any store without the swaps package configured.
+    /// (on-chain) UTXOs.
     /// </summary>
     private void StartBackgroundRecovery(string walletId)
     {
