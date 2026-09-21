@@ -123,6 +123,64 @@ public class ArkadeSolverSelectorTests
         }
         """;
 
+    // The index shape of a CAIP-19 card: the reducer down-projects id and carries the real identity in caip19_id.
+    private static string CanonicalMarket(
+        string solver, int feeBps, string baseId = "arkade:mutinynet/slip44:1",
+        string quoteId = "bolt11:mutinynet/slip44:1") => $$"""
+        {
+          "pair": "BTC/lightning:BTC",
+          "solver": "{{solver}}",
+          "discovery_pubkey": "{{solver}}-pubkey",
+          "base_asset": { "id": "btc", "caip19_id": "{{baseId}}", "name": "Bitcoin", "ticker": "BTC", "decimals": 8 },
+          "quote_asset": { "id": "btc", "caip19_id": "{{quoteId}}", "name": "Bitcoin", "ticker": "BTC", "decimals": 8 },
+          "fee_bps": {{feeBps}},
+          "min_base_amount": "1000",
+          "max_base_amount": "5000000",
+          "min_quote_amount": "1000",
+          "max_quote_amount": "5000000",
+          "transports": { "nostr": { "relays": ["wss://relay.example"] } }
+        }
+        """;
+
+    private const string UsdtOnArkade =
+        "arkade:mutinynet/asset:f121ac9b7656797cc68d1e8fecacfbaa2069ec1461edf0bf2f3c37404cb9791a0000";
+
+    [Fact]
+    public async Task A_caip19_card_serves_its_corridor()
+    {
+        var selector = SelectorOver(string.Join(",",
+            CanonicalMarket("ln-solver", feeBps: 10),
+            CanonicalMarket("onchain-solver", feeBps: 10, quoteId: "bitcoin:mutinynet/slip44:1")));
+
+        Assert.Equal("ln-solver-pubkey", (await selector.SelectAsync(10_000))!.Pubkey);
+        Assert.Equal("onchain-solver-pubkey",
+            (await selector.SelectAsync(10_000, ArkadeSolverSelector.OnchainCorridor))!.Pubkey);
+        Assert.Equal((1000L, 5000000L), await selector.ServedRangeAsync());
+    }
+
+    [Fact]
+    public async Task Legacy_and_caip19_cards_compete_on_price()
+    {
+        var selector = SelectorOver(string.Join(",",
+            LightningMarket("legacy-solver", feeBps: 60),
+            CanonicalMarket("caip19-solver", feeBps: 10)));
+
+        Assert.Equal("caip19-solver-pubkey", (await selector.SelectAsync(10_000))!.Pubkey);
+    }
+
+    [Theory]
+    [InlineData(UsdtOnArkade, "bolt11:mutinynet/slip44:1")]
+    [InlineData(UsdtOnArkade, "bolt11:mutinynet/asset:f121ac9b7656797cc68d1e8fecacfbaa2069ec1461edf0bf2f3c37404cb9791a0000")]
+    [InlineData("arkade:mutinynet/slip44:1", "eip155:1/slip44:60")]
+    [InlineData("not-a-caip19-id/at-all", "bolt11:mutinynet/slip44:1")]
+    public async Task A_market_that_is_not_bitcoin_both_ways_is_ignored(string baseId, string quoteId)
+    {
+        var selector = SelectorOver(CanonicalMarket("other", feeBps: 10, baseId, quoteId));
+
+        Assert.False(await selector.HasSolverForAsync(ArkadeSolverSelector.LightningCorridor));
+        Assert.Null(await selector.SelectAsync(10_000));
+    }
+
     [Fact]
     public async Task Picks_the_market_that_costs_the_payer_least_at_this_size()
     {

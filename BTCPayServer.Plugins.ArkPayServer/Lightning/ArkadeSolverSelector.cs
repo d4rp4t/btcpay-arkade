@@ -26,8 +26,6 @@ public sealed class ArkadeSolverSelector(
 
     public const string OnchainCorridor = "onchain";
 
-    private const string BitcoinAssetId = "btc";
-
     public bool HasExplicitSolver =>
         !string.IsNullOrWhiteSpace(options.RelayUri) && !string.IsNullOrWhiteSpace(options.SolverPubkey);
 
@@ -95,8 +93,22 @@ public sealed class ArkadeSolverSelector(
             : (bounded.Min(m => m.MinQuoteAmount), bounded.Max(m => m.MaxQuoteAmount));
     }
 
-    private static string PairFor(string quoteCorridor) =>
-        $"{SolverMarket.ArkadeCorridor}:{BitcoinAssetId}/{quoteCorridor}:{BitcoinAssetId}";
+    // Matched on meaning, not on PairKey: a legacy card keys as "arkade:btc/lightning:btc", a CAIP-19 one as
+    // "arkade:<network>/slip44:N/bolt11:<network>/slip44:N", and the index carries both.
+    private static bool IsBitcoinCorridor(SolverMarket market, string quoteCorridor)
+    {
+        try
+        {
+            return market.CorridorOf(MarketSide.Base) == SolverMarket.ArkadeCorridor
+                   && market.CorridorOf(MarketSide.Quote) == quoteCorridor
+                   && market.IsSameAsset
+                   && market.BaseAsset.LegacyId == "btc";
+        }
+        catch (Exception e) when (e is FormatException or NotSupportedException)
+        {
+            return false;
+        }
+    }
 
     private async Task<IReadOnlyList<IndexedMarket>> MarketsAsync(
         string quoteCorridor, CancellationToken cancellationToken)
@@ -106,9 +118,8 @@ public sealed class ArkadeSolverSelector(
             return [];
         }
 
-        var wanted = PairFor(quoteCorridor);
         return (await DiscoverAsync(cancellationToken))
-            .Where(m => m.PairKey() == wanted)
+            .Where(m => IsBitcoinCorridor(m, quoteCorridor))
             .Where(m => m.DiscoveryPubkey is { Length: > 0 } && m.Transports?.Nostr?.Relays.Count > 0)
             .ToList();
     }
