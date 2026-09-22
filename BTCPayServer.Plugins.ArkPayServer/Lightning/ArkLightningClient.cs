@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using NArk.Abstractions.Blockchain;
 using NArk.Abstractions.VTXOs;
 using NArk.ArkadeIntents;
+using NArk.ArkadeIntents.Lightning;
 using NArk.ArkadeIntents.Models;
 using NArk.ArkadeIntents.Rfq;
 using NArk.ArkadeIntents.Services;
@@ -201,6 +202,8 @@ public class ArkLightningClient(
     public async Task<PayResponse> Pay(
         string bolt11, PayInvoiceParams payParams, CancellationToken cancellation = default)
     {
+        BOLT11PaymentRequest? pr = null;
+        FundedLightningSend funded;
         try
         {
             if (string.IsNullOrEmpty(bolt11))
@@ -211,36 +214,34 @@ public class ArkLightningClient(
             await EnsureSpendAuthorized(cancellation);
 
             var (intents, solver, _) = Corridors;
-            var pr = BOLT11PaymentRequest.Parse(bolt11, network);
+            pr = BOLT11PaymentRequest.Parse(bolt11, network);
 
             // The Lightning leg; understates the trade by the fee, which is fine for picking a solver.
             var amountSats = (long)pr.MinimumAmount.ToUnit(LightMoneyUnit.Satoshi);
 
-            var funded = await solver.WithTransportAsync(amountSats, (transport, card) =>
+            funded = await solver.WithTransportAsync(amountSats, (transport, card) =>
                 intents.SendToLightningAsync(walletId, bolt11, transport, card, cancellation),
                 cancellation);
-
-            var intent = await GetIntentAsync(funded.RfqId, cancellation)
-                ?? throw new InvalidOperationException(
-                    $"The Arkade send swap '{funded.RfqId}' funded {funded.FundingTxid} but was not recorded.");
-
-            var payment = ArkadeIntentLightningMapper.ToPayment(intent, network);
-            return new PayResponse
-            {
-                Result = PayResult.Ok,
-                Details = new PayDetails
-                {
-                    PaymentHash = pr.PaymentHash,
-                    Preimage = string.IsNullOrEmpty(payment.Preimage) ? null : new uint256(payment.Preimage),
-                    Status = payment.Status,
-                    FeeAmount = payment.Fee,
-                    TotalAmount = payment.AmountSent
-                }
-            };
         }
         catch (Exception e)
         {
             return new PayResponse(PayResult.Error, e.Message);
+        }
+
+        // Funded, or possibly funded, from here on, so nothing below may answer Error: BTCPay would retry and pay twice.
+        if (!funded.FundingConfirmed)
+            return ArkadeIntentLightningMapper.InFlight(pr, $"The funding outcome of Arkade send swap '{funded.RfqId}' is unknown.");
+
+        try
+        {
+            var intent = await GetIntentAsync(funded.RfqId, cancellation);
+            return intent is null
+                ? ArkadeIntentLightningMapper.InFlight(pr, $"The Arkade send swap '{funded.RfqId}' was not found after funding.")
+                : ArkadeIntentLightningMapper.ToPayResponse(intent, pr, network);
+        }
+        catch (Exception e)
+        {
+            return ArkadeIntentLightningMapper.InFlight(pr, e.Message);
         }
     }
 

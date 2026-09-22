@@ -122,7 +122,10 @@ public class ArkadeSpendingService(
             }
 
             var resp = await lnClient.Pay(bolt11.ToString(), cancellationToken);
-            return resp.Result == PayResult.Ok ? null : throw new ArkadePaymentFailedException($"Payment failed: {resp?.ErrorDetail}");
+            // Unknown means funded and in flight; the swaps page follows it from there.
+            return resp.Result is PayResult.Ok or PayResult.Unknown
+                ? null
+                : throw new ArkadePaymentFailedException($"Payment failed: {resp?.ErrorDetail}");
         }
 
         // Resolve destination + amount for Ark-targeted payments.

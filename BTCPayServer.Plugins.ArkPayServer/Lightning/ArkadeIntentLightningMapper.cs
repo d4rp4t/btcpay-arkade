@@ -74,4 +74,30 @@ public static class ArkadeIntentLightningMapper
             Fee = locked - amount,
         };
     }
+
+    // BTCPay's payout processor marks Ok completed at once and retries Error, so anything short of a
+    // settled payment answers Unknown and is followed through GetPayment.
+    public static PayResponse ToPayResponse(ArkadeSwapIntent intent, BOLT11PaymentRequest pr, Network network)
+    {
+        var payment = ToPayment(intent, network);
+        return new PayResponse
+        {
+            // Never Error: this runs after funding, and even a failed-looking status may be a Resolved fill.
+            Result = payment.Status == LightningPaymentStatus.Complete ? PayResult.Ok : PayResult.Unknown,
+            Details = new PayDetails
+            {
+                PaymentHash = pr.PaymentHash,
+                Preimage = string.IsNullOrEmpty(payment.Preimage) ? null : new uint256(payment.Preimage),
+                Status = payment.Status,
+                FeeAmount = payment.Fee,
+                TotalAmount = payment.AmountSent
+            }
+        };
+    }
+
+    public static PayResponse InFlight(BOLT11PaymentRequest? pr, string detail) =>
+        new(PayResult.Unknown, detail)
+        {
+            Details = new PayDetails { PaymentHash = pr?.PaymentHash, Status = LightningPaymentStatus.Pending }
+        };
 }
