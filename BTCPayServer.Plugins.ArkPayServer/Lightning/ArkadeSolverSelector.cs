@@ -26,8 +26,15 @@ public sealed class ArkadeSolverSelector(
 
     public const string OnchainCorridor = "onchain";
 
+    // A relay carries everyone's traffic, so a key is what picks one counterparty out of it; an http(s)
+    // endpoint is already one counterparty, and asking for a key there is a step with nothing behind it.
     public bool HasExplicitSolver =>
-        !string.IsNullOrWhiteSpace(options.RelayUri) && !string.IsNullOrWhiteSpace(options.SolverPubkey);
+        !string.IsNullOrWhiteSpace(options.RelayUri)
+        && (!string.IsNullOrWhiteSpace(options.SolverPubkey) || IsHttp(options.RelayUri));
+
+    private static bool IsHttp(string? uri) =>
+        Uri.TryCreate(uri, UriKind.Absolute, out var parsed)
+        && (parsed.Scheme == Uri.UriSchemeHttp || parsed.Scheme == Uri.UriSchemeHttps);
 
     public bool CanReachASolver => HasExplicitSolver || (discovery is not null && networkName is not null);
 
@@ -42,7 +49,7 @@ public sealed class ArkadeSolverSelector(
     {
         if (HasExplicitSolver && Uri.TryCreate(options.RelayUri, UriKind.Absolute, out var configured))
         {
-            return new SolverRendezvous(options.SolverPubkey!, configured, null);
+            return new SolverRendezvous(options.SolverPubkey ?? "", configured, null);
         }
 
         var market = (await MarketsAsync(quoteCorridor, cancellationToken))

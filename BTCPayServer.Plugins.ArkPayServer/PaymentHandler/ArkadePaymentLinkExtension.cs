@@ -78,8 +78,10 @@ public class ArkadePaymentLinkExtension : IPaymentLinkExtension
             }
         }
         
-        // Add the Lightning invoice when there is one (preferred over LNURL).
-        if (ShouldIncludeLightning(prompt).Result)
+        // Add the Lightning invoice when there is one (preferred over LNURL). A store with no Lightning
+        // method has no prompt to read: the availability check answers for the corridor, not for whether
+        // this invoice was offered one.
+        if (ln is not null && ShouldIncludeLightning(prompt).Result)
         {
             builder.WithLightning(ln.Destination);
         }

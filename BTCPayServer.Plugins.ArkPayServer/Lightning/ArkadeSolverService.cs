@@ -55,12 +55,16 @@ public class ArkadeSolverService(
         return await negotiate(transport, rendezvous.Card);
     }
 
-    // The scheme picks the transport; a discovered solver is always reached over a relay.
+    // The scheme picks the transport; a discovered solver is always reached over a relay, which is also
+    // the only transport that needs the solver's key.
     private IRfqTransport Open(SolverRendezvous rendezvous) =>
         rendezvous.Relay.Scheme is var scheme
         && (scheme == Uri.UriSchemeHttp || scheme == Uri.UriSchemeHttps)
             ? new HttpRfqTransport(httpClientFactory.CreateClient(), rendezvous.Relay)
-            : new NostrRfqTransport(rendezvous.Relay, rendezvous.Pubkey);
+            : rendezvous.Pubkey is { Length: > 0 } pubkey
+                ? new NostrRfqTransport(rendezvous.Relay, pubkey)
+                : throw new InvalidOperationException(
+                    "A relay needs the solver's key to address it on: set solver-pubkey beside solver-relay.");
 
     // Null means no claim packet: we claim ourselves, and a throwaway key would only advertise an offline
     // claim path that does not exist. Read live every time, since covclaimd mints its key at startup.
