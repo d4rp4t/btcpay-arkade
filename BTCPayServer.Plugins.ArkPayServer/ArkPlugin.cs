@@ -326,6 +326,7 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
 
         services.AddSingleton<ArkContractInvoiceListener>();
         services.AddHostedService(sp => sp.GetRequiredService<ArkContractInvoiceListener>());
+        services.AddHostedService<ArkadeOnchainSwapInvoiceWatcher>();
 
         services.AddSingleton<BoardingTransactionListener>();
         services.AddHostedService(sp => sp.GetRequiredService<BoardingTransactionListener>());

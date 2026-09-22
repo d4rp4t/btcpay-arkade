@@ -9,6 +9,8 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using NArk.Abstractions.VTXOs;
+using NArk.ArkadeIntents;
+using NArk.ArkadeIntents.Models;
 using NArk.Core.Transport;
 using NBitcoin;
 using NBXplorer;
@@ -29,7 +31,8 @@ public class ArkContractInvoiceListener(
     IContractStorage contractStorage,
     PaymentService paymentService,
     IVtxoStorage vtxoStorage,
-    ILogger<ArkContractInvoiceListener> logger)
+    ILogger<ArkContractInvoiceListener> logger,
+    IArkadeIntentStorage? intentStorage = null)
     : IHostedService
 {
     private readonly Channel<string> _checkInvoices = Channel.CreateUnbounded<string>();
@@ -229,14 +232,31 @@ public class ArkContractInvoiceListener(
         // the sweeper, which finds them by contract type rather than by tag.
         var walletId = listenedContract.Details.WalletId;
         var invoiceSource = $"invoice:{invoice.Id}";
+        var payoutScript = await SwapPayoutScriptAsync(listenedContract.Details);
+        var payoutActivity = payoutScript is null
+            ? activityState
+            : OnchainSwapInvoicePolicy.PayoutActivity(invoice.Status, await SwapStatusAsync(listenedContract.Details));
         var contracts = await contractStorage.GetContracts(
             walletIds: [walletId],
             cancellationToken: CancellationToken.None);
         foreach (var c in contracts.Where(c => c.Metadata?.GetValueOrDefault("Source") == invoiceSource))
         {
-            await contractStorage.UpdateContractActivityState(walletId, c.Script, activityState);
+            await contractStorage.UpdateContractActivityState(
+                walletId, c.Script, c.Script == payoutScript ? payoutActivity : activityState);
         }
     }
+
+    private async Task<string?> SwapPayoutScriptAsync(ArkadePromptDetails details)
+    {
+        if (details.SwapId is null) return null;
+        var network = (await clientTransport.GetServerInfoAsync()).Network;
+        return details.GetContract(network)?.GetScriptPubKey().ToHex();
+    }
+
+    private async Task<ArkadeSwapIntentStatus?> SwapStatusAsync(ArkadePromptDetails details) =>
+        details.SwapId is { } id && intentStorage is not null
+            ? (await intentStorage.GetArkadeSwapIntent(id))?.Status
+            : null;
 
     private ArkadeListenedContract? GetListenedArkadeInvoice(InvoiceEntity invoice)
     {
