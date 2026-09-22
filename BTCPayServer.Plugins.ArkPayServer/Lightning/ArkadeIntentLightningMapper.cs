@@ -49,11 +49,10 @@ public static class ArkadeIntentLightningMapper
         {
             ArkadeSwapIntentStatus.Fulfilled => LightningPaymentStatus.Complete,
 
-            // Resolved is spent past locktime by a fill or a refund; either way BTCPay should stop waiting.
-            ArkadeSwapIntentStatus.Refundable
-                or ArkadeSwapIntentStatus.Cancelled
-                or ArkadeSwapIntentStatus.Recoverable
-                or ArkadeSwapIntentStatus.Resolved => LightningPaymentStatus.Failed,
+            // Failed only once our refund has landed. BTCPay cancels a failed payout and it gets paid
+            // again, so Refundable (the solver can still claim), Recoverable and an unproven Resolved
+            // stay pending instead.
+            ArkadeSwapIntentStatus.Cancelled => LightningPaymentStatus.Failed,
 
             _ => LightningPaymentStatus.Pending,
         };

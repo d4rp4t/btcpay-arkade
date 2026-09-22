@@ -61,4 +61,21 @@ public class ArkadeSendPayResponseTests
         Assert.Equal(Pr.PaymentHash, response.Details.PaymentHash);
         Assert.Equal("boom", response.ErrorDetail);
     }
+
+    [Theory]
+    [InlineData(ArkadeSwapIntentStatus.Refundable)]
+    [InlineData(ArkadeSwapIntentStatus.Resolved)]
+    [InlineData(ArkadeSwapIntentStatus.Recoverable)]
+    public void ASendNotProvenRefunded_IsStillPending(ArkadeSwapIntentStatus status)
+    {
+        Assert.Equal(LightningPaymentStatus.Pending,
+            ArkadeIntentLightningMapper.ToPayment(Send(status), Network.RegTest).Status);
+    }
+
+    [Fact]
+    public void ASendWhoseRefundLanded_IsFailed()
+    {
+        Assert.Equal(LightningPaymentStatus.Failed,
+            ArkadeIntentLightningMapper.ToPayment(Send(ArkadeSwapIntentStatus.Cancelled), Network.RegTest).Status);
+    }
 }
