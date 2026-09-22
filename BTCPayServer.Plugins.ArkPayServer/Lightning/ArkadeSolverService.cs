@@ -1,8 +1,8 @@
+using Microsoft.Extensions.Logging;
 using System.Net.Http.Json;
 using System.Text.Json;
 using NArk.ArkadeIntents.Rfq;
 using NArk.ArkadeIntents.SolverRegistry;
-using NBitcoin;
 
 namespace BTCPayServer.Plugins.ArkPayServer.Lightning;
 
@@ -10,10 +10,9 @@ namespace BTCPayServer.Plugins.ArkPayServer.Lightning;
 public class ArkadeSolverService(
     ArkadeSolverOptions options,
     ArkadeSolverSelector selector,
-    IHttpClientFactory httpClientFactory)
+    IHttpClientFactory httpClientFactory,
+    ILogger<ArkadeSolverService> logger)
 {
-    private string? _covclaimdKey;
-
     public bool IsConfigured => selector.CanReachASolver;
 
     // No size check here: which card bound applies depends on trade direction; the quote answers it exactly.
@@ -63,32 +62,34 @@ public class ArkadeSolverService(
             ? new HttpRfqTransport(httpClientFactory.CreateClient(), rendezvous.Relay)
             : new NostrRfqTransport(rendezvous.Relay, rendezvous.Pubkey);
 
-    // Without a daemon the packet is sealed to a throwaway key: the wire field is satisfied and only we can
-    // claim. Being down for the whole window fails the payment but loses no funds.
-    // The daemon generates its key at startup, so it is fetched (and cached per lifetime) rather than configured.
-    // The throwaway key is not cached: reuse would link swaps on the wire.
-    public async Task<string> ResolveClaimRecipientAsync(CancellationToken cancellationToken = default)
+    // Null means no claim packet: we claim ourselves, and a throwaway key would only advertise an offline
+    // claim path that does not exist. Read live every time, since covclaimd mints its key at startup.
+    // An unreachable daemon costs the offline backstop, not the payment.
+    public async Task<string?> ResolveClaimRecipientAsync(CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(options.CovclaimdUri))
         {
-            return new Key().PubKey.Compress().ToHex();
+            return null;
         }
 
-        if (_covclaimdKey is { } cached)
+        try
         {
-            return cached;
+            using var http = httpClientFactory.CreateClient();
+            http.BaseAddress = new Uri(options.CovclaimdUri.TrimEnd('/') + "/");
+
+            var doc = await http.GetFromJsonAsync<JsonElement>("v1/preimage/covclaimd-pubkey", cancellationToken);
+            if (doc.TryGetProperty("covclaimd_pub_key", out var key) && key.GetString() is { Length: > 0 } hex)
+            {
+                return hex;
+            }
+
+            logger.LogWarning("The claim daemon at {Uri} answered without a public key; swapping without it", options.CovclaimdUri);
         }
-
-        using var http = httpClientFactory.CreateClient();
-        http.BaseAddress = new Uri(options.CovclaimdUri.TrimEnd('/') + "/");
-
-        var doc = await http.GetFromJsonAsync<JsonElement>("v1/preimage/covclaimd-pubkey", cancellationToken);
-        if (!doc.TryGetProperty("covclaimd_pub_key", out var key) || key.GetString() is not { Length: > 0 } hex)
+        catch (Exception e) when (e is not OperationCanceledException)
         {
-            throw new InvalidOperationException(
-                $"The claim daemon at {options.CovclaimdUri} answered without a public key.");
+            logger.LogWarning(e, "The claim daemon at {Uri} is unreachable; swapping without it", options.CovclaimdUri);
         }
 
-        return _covclaimdKey = hex;
+        return null;
     }
 }
