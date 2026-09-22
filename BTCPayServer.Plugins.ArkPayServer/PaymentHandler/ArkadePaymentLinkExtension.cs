@@ -64,11 +64,9 @@ public class ArkadePaymentLinkExtension : IPaymentLinkExtension
             {
                 builder.WithOnchainAddress(details.SwapHtlcAddress);
 
-                // The solver's number, not the invoice's, even though the two normally agree: the
-                // quote is asked for on the side the payer funds, so what it answers with IS what
-                // the HTLC must receive. Reading the invoice's own due amount instead would be
-                // relying on that agreement holding, and this corridor gives no second chance —
-                // one output, exact value, or the swap is dead and the money waits for a refund.
+                // The solver's number rather than the invoice's, though a swap is only offered when the
+                // two agree: the HTLC takes one output of exactly this value or the swap is dead and the
+                // money waits for a refund.
                 if (details.SwapFundAmountSats is { } exact)
                 {
                     builder.WithAmount(Money.Satoshis(exact).ToUnit(MoneyUnit.BTC));

@@ -165,6 +165,7 @@ public partial class ArkController
             StoreId = store!.Id,
             IsDestinationSweepEnabled = destination is not null,
             IsLightningEnabled = IsArkadeLightningEnabled(),
+            SwapFeePayer = ArkadeSwapFeePayerSetting.Read(wallet),
             Balances = balances,
             WalletId = config.WalletId,
             Destination = destination,
@@ -241,6 +242,22 @@ public partial class ArkController
     {
         var (store, config, errorResult) = await ValidateStoreAndConfig();
         if (errorResult != null) return errorResult;
+
+        if (command == "toggle-swap-fee-payer")
+        {
+            var wallet = await walletStorage.GetWalletById(config!.WalletId!, cancellationToken);
+            var next = ArkadeSwapFeePayerSetting.Read(wallet) == ArkadeSwapFeePayer.Recipient
+                ? ArkadeSwapFeePayer.Sender
+                : ArkadeSwapFeePayer.Recipient;
+            await walletStorage.SetMetadataValue(
+                config.WalletId!, ArkadeSwapFeePayerSetting.MetadataKey, next.ToString(), cancellationToken);
+
+            return RedirectWithSuccess(nameof(StoreOverview),
+                next == ArkadeSwapFeePayer.Sender
+                    ? "Swap fee now paid by the sender — invoices and onchain amounts exceed the order, which LNURL and checkout wallets may refuse."
+                    : "Swap fee now paid by this store — payers are billed the order amount and the fee comes out of the payout.",
+                new { storeId });
+        }
 
         if (command == "clear-destination")
         {

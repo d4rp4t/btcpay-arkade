@@ -4,6 +4,8 @@ using BTCPayServer.Payments.Lightning;
 using Microsoft.Extensions.Logging;
 using NArk.Abstractions.Blockchain;
 using NArk.Abstractions.VTXOs;
+using NArk.Abstractions.Wallets;
+using BTCPayServer.Plugins.ArkPayServer.PaymentHandler;
 using NArk.ArkadeIntents;
 using NArk.ArkadeIntents.Lightning;
 using NArk.ArkadeIntents.Models;
@@ -29,6 +31,7 @@ public class ArkLightningClient(
     ILogger<ArkLightningInvoiceListener> logger,
     ArkLightningSpendCapability spendCapability,
     ArkLightningSpendKeyService spendKeyService,
+    IWalletStorage walletStorage,
     ArkadeIntentsService? intents = null,
     ArkadeSolverService? solver = null,
     IArkadeIntentStorage? intentStorage = null) : IExtendedLightningClient
@@ -124,8 +127,8 @@ public class ArkLightningClient(
         LightMoney amount, string description, TimeSpan expiry, CancellationToken cancellation = default) =>
         CreateInvoice(new CreateInvoiceParams(amount, description, expiry), cancellation);
 
-    // Exact-in (RfqAmountSide.From): the payer is billed the requested amount and the fee comes out of
-    // what lands. Exact-out would mint an invoice above what the customer approved, which LUD-06 wallets refuse.
+    // Which leg the order amount pins is the store's choice: exact-in bills the payer that amount and
+    // nets the fee out of the payout, exact-out mints an invoice above it, which LUD-06 wallets refuse.
     // BTCPay's description and expiry are dropped; the solver mints the invoice and the RFQ carries neither.
     public async Task<LightningInvoice> CreateInvoice(
         CreateInvoiceParams createInvoiceRequest, CancellationToken cancellation = default)
@@ -143,10 +146,13 @@ public class ArkLightningClient(
         var amountSats = (long)createInvoiceRequest.Amount.ToUnit(LightMoneyUnit.Satoshi);
         var claimRecipient = await solver.ResolveClaimRecipientAsync(cancellation);
 
+        var amountSide = ArkadeSwapFeePayerSetting.AmountSide(
+            await ArkadeSwapFeePayerSetting.ReadAsync(walletStorage, walletId, cancellation));
+
         var pending = await solver.WithTransportAsync(amountSats, (transport, card) =>
             intents.ReceiveFromLightningAsync(
                 walletId, amountSats, transport, claimRecipient, card,
-                amountSide: RfqAmountSide.From, cancellationToken: cancellation), cancellation);
+                amountSide: amountSide, cancellationToken: cancellation), cancellation);
 
         var intent = await GetIntentAsync(pending.RfqId, cancellation)
             ?? throw new InvalidOperationException(

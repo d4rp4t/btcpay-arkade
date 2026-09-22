@@ -116,6 +116,24 @@
                         </div>
                     }
 
+                    @if (Model.SolverConfigured)
+                    {
+                        var senderPays = Model.SwapFeePayer == ArkadeSwapFeePayer.Sender;
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="text-muted">Swap Fee</span>
+                            <form asp-action="UpdateWalletConfig" method="post" asp-route-storeId="@storeId" class="d-inline">
+                                <button type="submit" name="command" value="toggle-swap-fee-payer"
+                                        class="btn btn-sm badge text-primary @(senderPays ? "btn-outline-warning" : "btn-outline-secondary")"
+                                        data-testid="toggle-swap-fee-payer-btn"
+                                        title="@(senderPays
+                                                   ? "The sender pays the solver's fee: Lightning invoices exceed the order amount, which LNURL and checkout wallets (LUD-06) may refuse, and the onchain swap is not offered — onchain payers board instead. Click to pay it yourself."
+                                                   : "You pay the solver's fee: payers are billed the order amount on every rail and the fee comes out of what you receive. Click to bill the sender instead.")">
+                                    @(senderPays ? "Sender pays" : "Store pays")
+                                </button>
+                            </form>
+                        </div>
+                    }
+
                     <div class="d-flex justify-content-between align-items-center mb-2">
                         <span class="text-muted">Auto-Sweep</span>
                         @if (Model.CanManagePrivateKeys)

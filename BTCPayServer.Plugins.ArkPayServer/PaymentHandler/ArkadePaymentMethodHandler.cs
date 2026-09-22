@@ -77,9 +77,13 @@ public class ArkadePaymentMethodHandler(
         var hasOnchain = context.InvoiceEntity.GetPaymentPrompt(PaymentTypes.CHAIN.GetPaymentMethodId("BTC")) is not null;
         var wallet = await walletStorage.GetWalletById(arkadePaymentMethodConfig.WalletId);
         var amountSats = Money.Coins(context.Prompt.Calculate().Due).Satoshi;
+        // The swap is offered only while this store covers the solver's fee, so the HTLC asks for the
+        // order amount like every other rail. Billing the payer instead would need a second amount that
+        // one BIP21 cannot carry, and boarding already takes the order amount — slower, but no fee.
+        var wantsSwap = arkadePaymentMethodConfig.OnchainSwapEnabled
+                        && ArkadeSwapFeePayerSetting.Read(wallet) == ArkadeSwapFeePayer.Recipient;
         // Also derived for the swap: its L1 refund must land on an address registered with this invoice.
-        var wantsBoarding = arkadePaymentMethodConfig.BoardingEnabled
-            || arkadePaymentMethodConfig.OnchainSwapEnabled;
+        var wantsBoarding = arkadePaymentMethodConfig.BoardingEnabled || wantsSwap;
         if (wantsBoarding &&
             !hasOnchain && wallet?.WalletType == WalletType.HD &&
             amountSats >= arkadePaymentMethodConfig.MinBoardingAmountSats)
@@ -104,7 +108,7 @@ public class ArkadePaymentMethodHandler(
                 context.TrackedDestinations.Add(boardingAddress.ToString());
                 context.TrackedDestinations.Add(boardingContract.GetScriptPubKey().ToHex());
 
-                var swap = arkadePaymentMethodConfig.OnchainSwapEnabled
+                var swap = wantsSwap
                     ? await NegotiateOnchainSwapAsync(
                         arkadePaymentMethodConfig.WalletId, amountSats, boardingAddress, contract)
                     : null;
@@ -156,7 +160,8 @@ public class ArkadePaymentMethodHandler(
     }
 
     // Returns null on any failure: a missing or unwilling solver means offering boarding, not failing checkout.
-    // Exact-OUT because invoices are credited by the VTXO that lands; exact-in would underpay by the fee.
+    // Exact-in: the HTLC asks for the order amount, and the invoice is credited with what the payer sent
+    // rather than the smaller amount that lands, so every rail on the payment link shares one amount.
     // The payout must be the prompt's contract: ArkContractInvoiceListener only credits addresses in
     // TrackedDestinations, so a fresh one would be claimed but leave the invoice unpaid. It also saves an HD index.
     private async Task<PendingOnchainReceive?> NegotiateOnchainSwapAsync(
@@ -178,7 +183,7 @@ public class ArkadePaymentMethodHandler(
                 amountSats, ArkadeSolverSelector.OnchainCorridor,
                 (transport, card) => intents.ReceiveFromOnchainAsync(
                     walletId, amountSats, transport, covclaimd, refundDestination,
-                    amountSide: RfqAmountSide.To, solverCard: card,
+                    amountSide: RfqAmountSide.From, solverCard: card,
                     payoutContract: payoutContract, cancellationToken: timeout.Token),
                 timeout.Token);
         }

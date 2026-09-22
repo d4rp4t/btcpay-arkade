@@ -116,7 +116,8 @@ public class ArkContractInvoiceListener(
                 Script = vtxo.Script,
                 SeenAt = vtxo.CreatedAt
             };
-            await HandlePaymentData(vtxoEntity, inv, arkadePaymentMethodHandler, paymentDestination, isConfirmed, isBoarding);
+            await HandlePaymentData(vtxoEntity, inv, arkadePaymentMethodHandler, paymentDestination, isConfirmed, isBoarding,
+                await SwapCreditSatsAsync(inv, vtxo));
         }
         catch (Exception ex)
         {
@@ -134,7 +135,21 @@ public class ArkContractInvoiceListener(
         return Task.CompletedTask;
     }
     
-    private async Task HandlePaymentData(VtxoEntity vtxo, InvoiceEntity invoice, ArkadePaymentMethodHandler handler, string? destination = null, bool isConfirmed = true, bool isBoarding = false)
+    // What the payer sent, when this VTXO is a swap's claim: the solver's fee came out of it, so the
+    // amount that lands is short of the order by that fee. Mirrors the Lightning corridor, where BTCPay
+    // credits the invoice the payer paid rather than what reaches the wallet.
+    private async Task<long?> SwapCreditSatsAsync(InvoiceEntity invoice, ArkVtxo vtxo)
+    {
+        if (intentStorage is null
+            || GetListenedArkadeInvoice(invoice)?.Details is not { SwapId: { } swapId } details
+            || await intentStorage.GetArkadeSwapIntent(swapId) is not { } swap
+            || (long)vtxo.Amount != swap.WantAmount.Satoshi)
+            return null;
+
+        return swap.OfferAmount.Satoshi;
+    }
+
+    private async Task HandlePaymentData(VtxoEntity vtxo, InvoiceEntity invoice, ArkadePaymentMethodHandler handler, string? destination = null, bool isConfirmed = true, bool isBoarding = false, long? creditSats = null)
     {
         var pmi = ArkadePlugin.ArkadePaymentMethodId;
         var details = new ArkadePaymentData($"{vtxo.TransactionId}:{vtxo.TransactionOutputIndex}", destination, isBoarding);
@@ -152,7 +167,7 @@ public class ArkContractInvoiceListener(
             var paymentData = new PaymentData
             {
                 Status = status,
-                Amount = Money.Satoshis(vtxo.Amount).ToDecimal(MoneyUnit.BTC),
+                Amount = Money.Satoshis(creditSats ?? vtxo.Amount).ToDecimal(MoneyUnit.BTC),
                 Created = vtxo.SeenAt,
                 Id = details.Outpoint,
                 Currency = "BTC",

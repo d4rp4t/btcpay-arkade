@@ -1,3 +1,4 @@
+using BTCPayServer.Plugins.ArkPayServer.PaymentHandler;
 using BTCPayServer.Plugins.ArkPayServer.Data;
 using BTCPayServer.Plugins.ArkPayServer.Services;
 using NArk.Abstractions.Contracts;
@@ -10,6 +11,9 @@ public class StoreOverviewViewModel
 {
     public string? StoreId { get; set; }
     public bool IsLightningEnabled { get; set; }
+
+    /// <summary>Who covers the solver's spread on a receive swap, Lightning or onchain.</summary>
+    public ArkadeSwapFeePayer SwapFeePayer { get; set; }
     public bool IsDestinationSweepEnabled { get; set; }
     public ArkBalancesViewModel? Balances { get; set; }
     public string? WalletId { get; set; }

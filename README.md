@@ -116,6 +116,19 @@ The setup script will:
 | Boarding Minimum | 5000 sats | Minimum amount to display boarding address (floor: 330 sats / P2TR dust) |
 | Sub-dust Payments | Disabled | Accept payments below 330 sats (no dust limit for VTXOs) |
 | Auto-sweep Address | — | Forward all received funds to this on-chain address automatically |
+| Swap Fee | Store pays | Who covers the solver's spread on a receive swap, Lightning or onchain (see below) |
+
+**Swap Fee** decides which leg of a receive swap the order amount pins, and the two sides differ for
+the payer:
+
+- **Store pays** (default): the payer is billed the order amount — the invoice is minted for it, and the
+  onchain swap's HTLC asks for it — and the solver's fee comes out of what the store receives. The
+  invoice is credited with what the payer sent, as it is on any Lightning corridor.
+- **Sender pays**: the store receives the order amount in full and the payer is billed the fee on top.
+  A Lightning invoice then exceeds the amount the customer approved, which LUD-06 wallets refuse. The
+  onchain swap is not offered at all in this mode — it would need an amount the other rails do not
+  share, and one BIP21 carries a single amount — so onchain payers use the boarding address, which
+  takes the order amount and charges no fee.
 
 ### 4. Lightning configuration
 
