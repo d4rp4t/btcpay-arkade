@@ -15,6 +15,12 @@ public static class OnchainSwapInvoicePolicy
         : swap is { } s && !ArkadeSwapStateMachine.Terminal.Contains(s) ? ContractActivityState.AwaitingFundsBeforeDeactivate
         : ContractActivityState.Inactive;
 
+    // A quote the payer can no longer fund is an address the checkout must stop showing: the solver drops
+    // an unfunded quote of its own accord, and money sent after that waits out the HTLC locktime instead
+    // of paying anything. Boarding has no such deadline.
+    public static bool CoversCheckout(long quoteValidUntil, DateTimeOffset invoiceExpiry) =>
+        quoteValidUntil >= invoiceExpiry.ToUnixTimeSeconds();
+
     // A funded HTLC keeps the invoice open until the swap's claim deadline, the last moment it can be paid.
     public static TimeSpan? ExtensionFor(DateTimeOffset invoiceExpiry, DateTimeOffset now, long claimDeadline)
     {

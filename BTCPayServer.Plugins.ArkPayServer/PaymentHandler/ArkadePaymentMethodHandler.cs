@@ -113,6 +113,18 @@ public class ArkadePaymentMethodHandler(
                         arkadePaymentMethodConfig.WalletId, amountSats, boardingAddress, contract)
                     : null;
 
+                // Only learnable after asking: the quote names its own deadline. One that runs out inside
+                // the checkout window would leave a payer funding an address nobody is waiting on.
+                if (swap is not null
+                    && !OnchainSwapInvoicePolicy.CoversCheckout(
+                        swap.Quote.ValidUntil, context.InvoiceEntity.ExpirationTime))
+                {
+                    logger.LogInformation(
+                        "Invoice {InvoiceId}: the swap quote expires before the checkout does; offering boarding instead",
+                        context.InvoiceEntity.Id);
+                    swap = null;
+                }
+
                 // An invoice-tagged contract is deactivated once the invoice leaves New, but the swap's
                 // refund lands hours later at the L1 locktime; the swap-refund tag keeps it watched.
                 // Skipped entirely when neither boarding nor a swap will use it.

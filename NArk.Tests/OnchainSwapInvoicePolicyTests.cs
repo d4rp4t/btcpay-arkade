@@ -39,6 +39,20 @@ public class OnchainSwapInvoicePolicyTests
     }
 
     [Fact]
+    public void AQuoteThatOutlivesTheCheckout_IsOffered()
+    {
+        Assert.True(OnchainSwapInvoicePolicy.CoversCheckout(Now.AddMinutes(15).ToUnixTimeSeconds(), Now.AddMinutes(15)));
+        Assert.True(OnchainSwapInvoicePolicy.CoversCheckout(Now.AddMinutes(20).ToUnixTimeSeconds(), Now.AddMinutes(15)));
+    }
+
+    [Fact]
+    public void AQuoteThatRunsOutFirst_IsNotOffered()
+    {
+        // A 60-minute checkout against the reference solver's 15-minute quote: boarding instead.
+        Assert.False(OnchainSwapInvoicePolicy.CoversCheckout(Now.AddMinutes(15).ToUnixTimeSeconds(), Now.AddMinutes(60)));
+    }
+
+    [Fact]
     public void AFundedSwapExtendsTheInvoiceToItsClaimDeadline()
     {
         var deadline = Now.AddHours(3).ToUnixTimeSeconds();
