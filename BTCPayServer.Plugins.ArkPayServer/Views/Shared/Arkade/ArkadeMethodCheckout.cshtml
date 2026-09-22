@@ -33,7 +33,8 @@
            value, so an amount typed by hand is the difference between a payment and a wait for a
            refund. Said here because the BIP21 amount is invisible to anyone copying the address. *@
         <div v-if="hasSwapAddress" class="alert alert-warning mt-3 mb-0 py-2 px-3" data-testid="swap-exact-amount">
-            <small v-t="'arkade_swap_exact_amount'">Send exactly this amount, in a single transaction.</small>
+            <small v-if="swapFundAmountBtc">Send exactly <strong class="font-monospace">{{ swapFundAmountBtc }} BTC</strong> to this address, in a single transaction. It includes the swap fee.</small>
+            <small v-else v-t="'arkade_swap_exact_amount'">Send exactly this amount, in a single transaction.</small>
         </div>
         <div v-if="lightning && shouldShowLightning" class="input-group mt-3" data-testid="bolt11-invoice">
             <div class="form-floating" id="Lightning_@Model.PaymentMethodId">
@@ -69,7 +70,8 @@
                 nfcSubmitting: false,
                 shouldShowLightning: @Safe.Json(shouldShowLightning),
                 hasBoardingAddress: @Safe.Json(Model.AdditionalData.ContainsKey("hasBoardingAddress") && (bool)Model.AdditionalData["hasBoardingAddress"]),
-                hasSwapAddress: @Safe.Json(Model.AdditionalData.ContainsKey("hasSwapAddress") && (bool)Model.AdditionalData["hasSwapAddress"])
+                hasSwapAddress: @Safe.Json(Model.AdditionalData.ContainsKey("hasSwapAddress") && (bool)Model.AdditionalData["hasSwapAddress"]),
+                swapFundAmountBtc: @Safe.Json(Model.AdditionalData.TryGetValue("swapFundAmountBtc", out var swapFund) ? swapFund.ToString() : null)
             };
         },
         computed: {

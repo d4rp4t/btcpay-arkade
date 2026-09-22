@@ -1,3 +1,4 @@
+using NBitcoin;
 using BTCPayServer.Data;
 using BTCPayServer.Models.InvoicingModels;
 using BTCPayServer.Payments;
@@ -104,7 +105,13 @@ public class ArkadeCheckoutModelExtension: ICheckoutModelExtension, IGlobalCheck
             // needs to tell them apart: they settle on different clocks, and the swap's address
             // will not accept a near miss.
             if (!string.IsNullOrEmpty(details.SwapHtlcAddress))
+            {
                 context.Model.AdditionalData["hasSwapAddress"] = JToken.FromObject(true);
+                // Shown beside the warning: it includes the solver's fee, so it is not the due amount in the header.
+                if (details.SwapFundAmountSats is { } fund)
+                    context.Model.AdditionalData["swapFundAmountBtc"] =
+                        JToken.FromObject(Money.Satoshis(fund).ToDecimal(MoneyUnit.BTC));
+            }
         }
     }
 
