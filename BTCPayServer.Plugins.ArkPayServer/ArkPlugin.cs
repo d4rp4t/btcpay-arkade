@@ -22,6 +22,7 @@ using NArk.Abstractions.Intents;
 using NArk.Abstractions.Safety;
 using NArk.Abstractions.Wallets;
 using NArk.Arkade.Hosting;
+using NArk.ArkadeIntents;
 using NArk.ArkadeIntents.Hosting;
 using NArk.Blockchain;
 using NArk.Hosting;
@@ -373,7 +374,9 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         if (!solverOptions.HasEmulator) return;
 
         services.AddArkadeEmulator(o => o.ServerUrl = solverOptions.EmulatorUri!);
-        services.AddArkadeIntentsServices();
+        // A store can run a watch-only Arkade wallet, and the corridors claim on its behalf: without the
+        // signerless leaves such a store could be paid over Lightning and never take delivery.
+        services.AddArkadeIntentsServices(new ArkadeIntentsOptions { SignerlessFallback = true });
     }
 
     // Nothing creates VHTLCs any more, but these keep one still holding sats drainable (claim with the

@@ -130,6 +130,10 @@ the payer:
   share, and one BIP21 carries a single amount — so onchain payers use the boarding address, which
   takes the order amount and charges no fee.
 
+A store can run a watch-only Arkade wallet, so the plugin enables the SDK's `SignerlessFallback`: a
+claim or refund such a wallet cannot sign goes through the covenant's signerless leaf instead, which
+pays the same pinned address and is co-signed by the covenant emulator.
+
 ### 4. Lightning configuration
 
 Lightning is settled over the Arkade intent corridors, configured in the same `ark.json` the
