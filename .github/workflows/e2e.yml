@@ -34,8 +34,8 @@ jobs:
             filter: --filter-trait "Category=LightningCorridors"
             solver-image: ghcr.io/arkade-os/intent-solver:0.2.0
             solver-url: http://127.0.0.1:8787
-            job-minutes: 75
-            test-minutes: 50
+            job-minutes: 45
+            test-minutes: 25
             vtxo-tree-expiry: "15360"
             boarding-exit-delay: "2048"
             checkpoint-exit-delay: "1536"
