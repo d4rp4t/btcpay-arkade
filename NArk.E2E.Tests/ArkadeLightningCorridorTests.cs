@@ -85,14 +85,12 @@ public class ArkadeLightningCorridorTests : PlaywrightBaseTest
     {
         RequireSolver();
 
-        var (storeId, _) = await SetUpStoreAsync();
+        var (storeId, client) = await SetUpStoreAsync();
         var walletId = await GetStoreWalletIdAsync(storeId);
-        await FundWalletViaNoteAsync(
-            _fixture.ServerTester!.PayTester.ServiceProvider, walletId!, 200_000);
+        await FundOverTheReceiveCorridorAsync(client, storeId, 50_000);
 
-        // Slow part is note redemption (AMOUNT_TOO_LOW until arkd accepts the shape), seen at 20s to 5+ min.
         var outpoints = await PollForSpendableCoinsAsync(
-            storeId, "LightningInvoice", 30_000, TimeSpan.FromMinutes(10));
+            storeId, "LightningInvoice", 30_000, TimeSpan.FromMinutes(2));
         Assert.NotEmpty(outpoints);
 
         var bolt11 = await DockerHelper.CreateLndInvoice(amtSats: 20_000, expirySecs: 1800, container: "lnd-peer");
@@ -120,11 +118,9 @@ public class ArkadeLightningCorridorTests : PlaywrightBaseTest
     {
         RequireSolver();
 
-        var (storeId, _) = await SetUpStoreAsync();
-        var walletId = await GetStoreWalletIdAsync(storeId);
-        await FundWalletViaNoteAsync(
-            _fixture.ServerTester!.PayTester.ServiceProvider, walletId!, 200_000);
-        await PollForSpendableCoinsAsync(storeId, "LightningInvoice", 30_000, TimeSpan.FromMinutes(10));
+        var (storeId, client) = await SetUpStoreAsync();
+        await FundOverTheReceiveCorridorAsync(client, storeId, 50_000);
+        await PollForSpendableCoinsAsync(storeId, "LightningInvoice", 30_000, TimeSpan.FromMinutes(2));
 
         var bolt11 = await DockerHelper.CreateLndInvoice(amtSats: 20_000, expirySecs: 1800, container: "lnd-peer");
 
@@ -473,6 +469,22 @@ public class ArkadeLightningCorridorTests : PlaywrightBaseTest
         var storeId = await CreateStoreWithArkWalletAsync(GenerateRandomNsec());
         await EnableLightningAsync(storeId);
         return (storeId, new BTCPayServerClient(ServerUri, CreatedUser, Password));
+    }
+
+    // Funding over the corridor instead of redeeming a note: a note has to settle into a batch before
+    // it can be spent, which costs minutes and stalls outright whenever a round is failing. A paid
+    // invoice lands as an ordinary offchain payment, spendable as soon as it is claimed.
+    private async Task FundOverTheReceiveCorridorAsync(
+        BTCPayServerClient client, string storeId, long amountSats)
+    {
+        await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
+        var before = await ReadAvailableBalanceSatsAsync();
+
+        var bolt11 = await CreateLightningInvoiceAsync(client, storeId, amountSats);
+        await DockerHelper.Exec("lnd-peer", ["lncli", "--network=regtest", "payinvoice", "--force", bolt11]);
+
+        var after = await PollForBalanceAsync(storeId, before + 1, TimeSpan.FromMinutes(5));
+        Assert.True(after > before, $"funding over the corridor did not land ({before} -> {after})");
     }
 
     private async Task<string> CreateLightningInvoiceAsync(
