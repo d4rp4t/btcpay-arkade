@@ -60,30 +60,28 @@ public class ArkLightningInvoiceListener : ILightningInvoiceListener
         }
     }
 
-    public async Task<LightningInvoice?> WaitInvoice(CancellationToken cancellation)
+    /// <summary>
+    /// Blocks until one of this wallet's Lightning receives is paid, and throws
+    /// <see cref="OperationCanceledException"/> once there will be no more.
+    /// </summary>
+    /// <remarks>
+    /// Returning instead of throwing is not an option BTCPay leaves open: its listen loop reads
+    /// <c>notification.Id</c> and looks it up in a dictionary that rejects a null key, so a null or an
+    /// empty invoice takes down the notification path and leaves every receive to the one-minute poll.
+    /// Cancellation is the loop's own quiet exit, and it reconnects after anything else.
+    /// </remarks>
+    public async Task<LightningInvoice> WaitInvoice(CancellationToken cancellation)
     {
         using var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(_cancellationToken, cancellation);
 
-        try
+        while (await _paidInvoicesChannel.Reader.WaitToReadAsync(combinedCts.Token))
         {
-            while (await _paidInvoicesChannel.Reader.WaitToReadAsync(combinedCts.Token))
-            {
-                if (await _paidInvoicesChannel.Reader.ReadAsync(combinedCts.Token) is { } invoice)
-                {
-                    return invoice;
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // This is expected when cancellation is requested
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error waiting for invoice in wallet {WalletId}", _walletId);
+            if (await _paidInvoicesChannel.Reader.ReadAsync(combinedCts.Token) is { } invoice)
+                return invoice;
         }
 
-        return new LightningInvoice();
+        throw new OperationCanceledException(
+            $"No further Lightning invoices will arrive for wallet {_walletId}.", combinedCts.Token);
     }
 
     public void Dispose()
