@@ -374,7 +374,7 @@ public class ArkadeLightningCorridorTests : PlaywrightBaseTest
         var preimage = RandomNumberGenerator.GetBytes(32);
         var paymentHash = Convert.ToHexString(SHA256.HashData(preimage)).ToLowerInvariant();
         await DockerHelper.Exec(
-            "lnd", ["lncli", "--network=regtest", "addholdinvoice", paymentHash, "20000"]);
+            "lnd-peer", ["lncli", "--network=regtest", "addholdinvoice", paymentHash, "20000"]);
 
         var held = await ReadHoldInvoiceAsync(paymentHash);
         Assert.False(string.IsNullOrEmpty(held), "lnd did not return a hold invoice");
@@ -443,7 +443,7 @@ public class ArkadeLightningCorridorTests : PlaywrightBaseTest
     private static async Task<string?> ReadHoldInvoiceAsync(string paymentHash)
     {
         var raw = await DockerHelper.Exec(
-            "lnd", ["lncli", "--network=regtest", "lookupinvoice", paymentHash]);
+            "lnd-peer", ["lncli", "--network=regtest", "lookupinvoice", paymentHash]);
 
         using var doc = JsonDocument.Parse(raw);
         return doc.RootElement.TryGetProperty("payment_request", out var pr) ? pr.GetString() : null;
@@ -539,7 +539,7 @@ public class ArkadeLightningCorridorTests : PlaywrightBaseTest
         while (DateTimeOffset.UtcNow < deadline)
         {
             var raw = await DockerHelper.Exec(
-                "lnd", ["lncli", "--network=regtest", "lookupinvoice", paymentHash]);
+                "lnd-peer", ["lncli", "--network=regtest", "lookupinvoice", paymentHash]);
 
             if (InvoiceState(raw) is "SETTLED") return true;
 
