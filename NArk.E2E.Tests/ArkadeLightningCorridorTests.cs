@@ -14,21 +14,23 @@ using Xunit;
 
 namespace NArk.E2E.Tests;
 
-// Not in CI: needs a solver, claim daemon and emulator beside regtest; skipped unless ARKADE_E2E_SOLVER_URL is set.
+// Needs a solver, claim daemon and emulator beside regtest; skipped unless ARKADE_E2E_SOLVER_URL is set.
 // An http:// solver URL selects the HTTP transport; ws:// selects a relay and also needs ARKADE_E2E_SOLVER_PUBKEY.
+// The solver's Lightning backend is the `lnd` container and lnd refuses self-payments, so every invoice
+// these tests pay, or hand over to be paid, is minted on `lnd-peer`.
 //
 // 1. Stack. VTXO_TREE_EXPIRY must exceed the solver's 7200s refund horizon or it silently refuses to fund:
-//    ARKD_VTXO_TREE_EXPIRY=15360 ARKD_UNILATERAL_EXIT_DELAY=512 ARKD_PUBLIC_UNILATERAL_EXIT_DELAY=512 \
-//    ARKD_BOARDING_EXIT_DELAY=2048 ARKD_CHECKPOINT_EXIT_DELAY=1536 COVCLAIMD_IMAGE=ghcr.io/arkade-os/covclaimd:v0.0.1-rc.4 \
-//    node submodules/NNark/regtest/regtest.mjs start --clean --profile emulator,covclaimd,lightning
-// 2. Solver: re-copy lnd-peer's tls.cert and admin.macaroon after every --clean, fund it
-//    (scripts/regtest-fund.mjs <regtest-dir> 0.05 && scripts/regtest-settle.mjs), then
-//    PORT=7095 node --experimental-eventsource --env-file=.env.regtest.lnd dist/cli.js serve
-// 3. dotnet run --project ConfigBuilder/ConfigBuilder.csproj, and install chromium via the built playwright.ps1.
-// 4. TESTS_BTCRPCCONNECTION="server=http://127.0.0.1:18443;admin1:123" TESTS_BTCNBXPLORERURL="http://127.0.0.1:32838/" \
+//    INTENT_SOLVER_IMAGE=ghcr.io/arkade-os/intent-solver:0.2.0 ARKD_VTXO_TREE_EXPIRY=15360 \
+//    ARKD_UNILATERAL_EXIT_DELAY=512 ARKD_PUBLIC_UNILATERAL_EXIT_DELAY=512 ARKD_BOARDING_EXIT_DELAY=2048 \
+//    ARKD_CHECKPOINT_EXIT_DELAY=1536 node submodules/NNark/regtest/regtest.mjs start --clean \
+//    --profile intent-solver,covclaimd
+// 2. dotnet run --project ConfigBuilder/ConfigBuilder.csproj, and install chromium via the built playwright.ps1.
+// 3. TESTS_BTCRPCCONNECTION="server=http://127.0.0.1:18443;admin1:123" TESTS_BTCNBXPLORERURL="http://127.0.0.1:32838/" \
 //    TESTS_POSTGRES="Host=localhost;Port=39372;Database=btcpay_e2e_test;Username=postgres" TESTS_HOSTNAME=127.0.0.1 \
-//    ARKADE_E2E_SOLVER_URL=http://127.0.0.1:7095 dotnet test --project NArk.E2E.Tests/NArk.E2E.Tests.csproj \
+//    ARKADE_E2E_SOLVER_URL=http://127.0.0.1:8787 dotnet test --project NArk.E2E.Tests/NArk.E2E.Tests.csproj \
 //    --filter-trait "Category=LightningCorridors"
+//
+// The "corridors" entry in .github/workflows/e2e.yml runs exactly this.
 [Collection("Arkade Plugin Tests")]
 [Trait("Category", "LightningCorridors")]
 public class ArkadeLightningCorridorTests : PlaywrightBaseTest
@@ -71,7 +73,7 @@ public class ArkadeLightningCorridorTests : PlaywrightBaseTest
         var bolt11 = await CreateLightningInvoiceAsync(client, storeId, orderSats);
 
         // The hold clears only once our claim reveals the preimage, so returning means the round trip completed.
-        await DockerHelper.Exec("lnd", ["lncli", "--network=regtest", "payinvoice", "--force", bolt11]);
+        await DockerHelper.Exec("lnd-peer", ["lncli", "--network=regtest", "payinvoice", "--force", bolt11]);
 
         var after = await PollForBalanceAsync(storeId, before + 1, TimeSpan.FromMinutes(5));
 
@@ -93,7 +95,7 @@ public class ArkadeLightningCorridorTests : PlaywrightBaseTest
             storeId, "LightningInvoice", 30_000, TimeSpan.FromMinutes(10));
         Assert.NotEmpty(outpoints);
 
-        var bolt11 = await DockerHelper.CreateLndInvoice(amtSats: 20_000, expirySecs: 1800);
+        var bolt11 = await DockerHelper.CreateLndInvoice(amtSats: 20_000, expirySecs: 1800, container: "lnd-peer");
 
         await GoToUrl($"/plugins/ark/stores/{storeId}/overview");
         var token = (await GetAntiforgeryTokenAsync()) ?? "";
@@ -124,7 +126,7 @@ public class ArkadeLightningCorridorTests : PlaywrightBaseTest
             _fixture.ServerTester!.PayTester.ServiceProvider, walletId!, 200_000);
         await PollForSpendableCoinsAsync(storeId, "LightningInvoice", 30_000, TimeSpan.FromMinutes(10));
 
-        var bolt11 = await DockerHelper.CreateLndInvoice(amtSats: 20_000, expirySecs: 1800);
+        var bolt11 = await DockerHelper.CreateLndInvoice(amtSats: 20_000, expirySecs: 1800, container: "lnd-peer");
 
         var response = await Page!.Context.APIRequest.PostAsync(
             new Uri(ServerUri!, $"/api/v1/stores/{storeId}/lightning/BTC/invoices/pay").AbsoluteUri,
@@ -210,7 +212,7 @@ public class ArkadeLightningCorridorTests : PlaywrightBaseTest
         Assert.False(string.IsNullOrEmpty(lightning.Preimage), "the preimage must be stored before the invoice is payable");
         Assert.NotEqual(ArkadeSwapIntentStatus.Fulfilled, recorded.Status);
 
-        await DockerHelper.Exec("lnd", ["lncli", "--network=regtest", "payinvoice", "--force", bolt11]);
+        await DockerHelper.Exec("lnd-peer", ["lncli", "--network=regtest", "payinvoice", "--force", bolt11]);
 
         var settled = await PollForIntentStatusAsync(
             walletId!, ArkadeSwapIntentType.LightningToBtc, ArkadeSwapIntentStatus.Fulfilled);
