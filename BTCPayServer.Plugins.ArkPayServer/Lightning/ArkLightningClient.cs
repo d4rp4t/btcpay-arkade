@@ -42,9 +42,8 @@ public class ArkLightningClient(
     /// </summary>
     public const string SpendKeyMetadataKey = "arkade.lightning.spendKey";
 
-    /// <summary>
-    /// Throws unless the caller presented the spend capability for this wallet.
-    /// </summary>
+    /// <summary>Throws unless the caller presented the spend capability. Guards paying only: an
+    /// invoice moves money into the wallet, so minting is no way to spend someone else's.</summary>
     private async Task EnsureSpendAuthorized(CancellationToken cancellation)
     {
         if (await spendKeyService.VerifyAsync(walletId, spendCapability.Value, cancellation))
@@ -133,8 +132,6 @@ public class ArkLightningClient(
     public async Task<LightningInvoice> CreateInvoice(
         CreateInvoiceParams createInvoiceRequest, CancellationToken cancellation = default)
     {
-        await EnsureSpendAuthorized(cancellation);
-
         var (intents, solver, _) = Corridors;
 
         var terms = await clientTransport.GetServerInfoAsync(cancellation);

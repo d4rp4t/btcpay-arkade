@@ -295,7 +295,7 @@ public class ArkadeLightningCorridorTests : PlaywrightBaseTest
 
     // Both connection strings name the same wallet; without the capability check the second store could spend it.
     [Fact]
-    public async Task ReceiveOnlyConnectionString_CannotMintInvoices()
+    public async Task AStoreWithoutTheSpendKey_TakesPaymentsButCannotPay()
     {
         RequireSolver();
 
@@ -310,12 +310,25 @@ public class ArkadeLightningCorridorTests : PlaywrightBaseTest
             Config = JObject.FromObject(new { connectionString = $"type=arkade;wallet-id={walletId}" })
         });
 
-        var ex = await Assert.ThrowsAnyAsync<Exception>(() =>
-            CreateLightningInvoiceAsync(client, borrowerStoreId, 25_000));
+        var bolt11 = await CreateLightningInvoiceAsync(client, borrowerStoreId, 25_000);
+        Assert.False(string.IsNullOrEmpty(bolt11), "a store without the spend-key could not take a payment");
 
-        Assert.True(
-            ex is GreenfieldAPIException or TimeoutException,
-            $"a receive-only store minted an invoice instead of being refused ({ex.GetType().Name}: {ex.Message})");
+        var payee = await DockerHelper.CreateLndInvoice(amtSats: 20_000, expirySecs: 1800, container: "lnd-peer");
+        var refused = await Page!.Context.APIRequest.PostAsync(
+            new Uri(ServerUri!, $"/api/v1/stores/{borrowerStoreId}/lightning/BTC/invoices/pay").AbsoluteUri,
+            new APIRequestContextOptions
+            {
+                Headers = new Dictionary<string, string>
+                {
+                    ["Authorization"] = "Basic " + Convert.ToBase64String(
+                        System.Text.Encoding.UTF8.GetBytes($"{CreatedUser}:{Password}")),
+                    ["Content-Type"] = "application/json",
+                },
+                Data = $$"""{"BOLT11":"{{payee}}"}""",
+            });
+
+        Assert.False(refused.Ok,
+            $"a store without the spend-key paid from somebody else's wallet (HTTP {refused.Status})");
     }
 
     [Fact]
