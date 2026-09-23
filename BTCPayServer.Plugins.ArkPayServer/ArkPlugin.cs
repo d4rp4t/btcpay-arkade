@@ -356,11 +356,11 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
         var solverOptions = GetSolverOptions(pluginServices);
         services.AddSingleton(solverOptions);
 
-        var registryNetwork = ArkadeSolverSelector.RegistryNetworkName(
-            DefaultConfiguration.GetNetworkType(
-                pluginServices.BootstrapServices.GetRequiredService<IConfiguration>()));
+        var networkType = DefaultConfiguration.GetNetworkType(
+            pluginServices.BootstrapServices.GetRequiredService<IConfiguration>());
+        var registryNetwork = ArkadeSolverSelector.RegistryNetworkName(networkType);
 
-        // GetService: SolverDiscoveryService only exists when an emulator is configured.
+        // GetService: SolverDiscoveryService only exists once the corridors register below.
         services.AddSingleton(sp => new ArkadeSolverSelector(
             solverOptions, registryNetwork, sp.GetService<SolverDiscoveryService>()));
         services.AddSingleton<ArkadeSolverService>();
@@ -371,12 +371,11 @@ public class ArkadePlugin : BaseBTCPayServerPlugin
 
         services.AddUIExtension("ln-payment-method-setup-tabhead", "/Views/Ark/ArkLNSetupTabhead.cshtml");
 
-        if (!solverOptions.HasEmulator) return;
+        if (!ArkadeSolverOptions.HasPinnedEmulatorKey(networkType)) return;
 
-        services.AddArkadeEmulator(o => o.ServerUrl = solverOptions.EmulatorUri!);
-        // A store can run a watch-only Arkade wallet, and the corridors claim on its behalf: without the
-        // signerless leaves such a store could be paid over Lightning and never take delivery.
-        services.AddArkadeIntentsServices(new ArkadeIntentsOptions { SignerlessFallback = true });
+        // Signerless claims are covclaimd's, which runs its own emulator; the lockup carries the leaf
+        // either way, since building it needs the pinned key rather than an endpoint.
+        services.AddArkadeIntentsServices(new ArkadeIntentsOptions { SignerlessFallback = false });
     }
 
     // Nothing creates VHTLCs any more, but these keep one still holding sats drainable (claim with the
