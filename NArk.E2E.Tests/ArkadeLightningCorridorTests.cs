@@ -111,6 +111,37 @@ public class ArkadeLightningCorridorTests : PlaywrightBaseTest
 
 
     // An order past the solver's float must yield no BOLT11: a payer could pay into a swap nobody funds.
+    // Funding the lockup is not the payment: the solver has yet to pay the invoice, so a 200 here
+    // would book a payout the payee was never paid for.
+    [Fact]
+    public async Task FundingASend_IsReportedAsInFlight()
+    {
+        RequireSolver();
+
+        var (storeId, _) = await SetUpStoreAsync();
+        var walletId = await GetStoreWalletIdAsync(storeId);
+        await FundWalletViaNoteAsync(
+            _fixture.ServerTester!.PayTester.ServiceProvider, walletId!, 200_000);
+        await PollForSpendableCoinsAsync(storeId, "LightningInvoice", 30_000, TimeSpan.FromMinutes(10));
+
+        var bolt11 = await DockerHelper.CreateLndInvoice(amtSats: 20_000, expirySecs: 1800);
+
+        var response = await Page!.Context.APIRequest.PostAsync(
+            new Uri(ServerUri!, $"/api/v1/stores/{storeId}/lightning/BTC/invoices/pay").AbsoluteUri,
+            new APIRequestContextOptions
+            {
+                Headers = new Dictionary<string, string>
+                {
+                    ["Authorization"] = "Basic " + Convert.ToBase64String(
+                        System.Text.Encoding.UTF8.GetBytes($"{CreatedUser}:{Password}")),
+                    ["Content-Type"] = "application/json",
+                },
+                Data = $$"""{"BOLT11":"{{bolt11}}"}""",
+            });
+
+        Assert.Equal(202, response.Status);
+    }
+
     [Fact]
     public async Task CreateInvoice_ForMoreThanTheSolverCanFund_HandsOutNoInvoice()
     {
@@ -302,7 +333,8 @@ public class ArkadeLightningCorridorTests : PlaywrightBaseTest
         await GoToUrl($"/plugins/ark/stores/{storeId}/lightning-swaps");
         var page = await Page!.ContentAsync();
 
-        Assert.Contains("Lightning swaps", page);
+        // The page lists every corridor's swaps now, so its heading is just "Swaps".
+        Assert.Contains(">Swaps<", page);
 
         // truncate-center splits the hash for display; its ends survive in the markup.
         Assert.Contains(paymentHash[..8], page, StringComparison.OrdinalIgnoreCase);
@@ -378,6 +410,20 @@ public class ArkadeLightningCorridorTests : PlaywrightBaseTest
         Assert.True(returned > 0, "the refund did not restore a spendable balance");
     }
 
+    // The same toggle the overview page posts; only the corridor tests need the store's LN method set.
+    private async Task EnableLightningAsync(string storeId)
+    {
+        var token = (await GetAntiforgeryTokenAsync()) ?? "";
+        var response = await Page!.Context.APIRequest.PostAsync(
+            new Uri(ServerUri!, $"/plugins/ark/stores/{storeId}/enable-ln").AbsoluteUri,
+            new APIRequestContextOptions
+            {
+                Headers = new Dictionary<string, string> { ["RequestVerificationToken"] = token },
+            });
+
+        Assert.True(response.Ok, $"enabling Lightning returned {response.Status}: {await response.TextAsync()}");
+    }
+
     private async Task<JsonElement> GetJsonAsync(string url)
     {
         var absolute = url.StartsWith("http", StringComparison.OrdinalIgnoreCase)
@@ -423,6 +469,7 @@ public class ArkadeLightningCorridorTests : PlaywrightBaseTest
         await RegisterNewUser(isAdmin: true);
 
         var storeId = await CreateStoreWithArkWalletAsync(GenerateRandomNsec());
+        await EnableLightningAsync(storeId);
         return (storeId, new BTCPayServerClient(ServerUri, CreatedUser, Password));
     }
 
