@@ -70,4 +70,23 @@ public class OnchainSwapInvoicePolicyTests
         Assert.Null(OnchainSwapInvoicePolicy.ExtensionFor(Now.AddHours(3), Now, deadline));
         Assert.Null(OnchainSwapInvoicePolicy.ExtensionFor(Now.AddMinutes(10), Now.AddHours(4), deadline));
     }
+
+    [Fact]
+    public void TheSolverFee_IsWhatTheInvoiceWasCreditedLessWhatLanded()
+    {
+        Assert.Equal(250, OnchainSwapInvoicePolicy.SolverFee(25_000, 24_750));
+    }
+
+    [Fact]
+    public void APaymentThatIsNotASwapClaim_ReportsNoFee()
+    {
+        Assert.Null(OnchainSwapInvoicePolicy.SolverFee(null, 24_750));
+        Assert.Null(OnchainSwapInvoicePolicy.SolverFee(25_000, 25_000));
+    }
+
+    [Fact]
+    public void AClaimLargerThanTheCredit_ReportsNoFee()
+    {
+        Assert.Null(OnchainSwapInvoicePolicy.SolverFee(25_000, 25_100));
+    }
 }

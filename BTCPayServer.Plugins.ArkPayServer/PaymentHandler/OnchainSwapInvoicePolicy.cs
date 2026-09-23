@@ -21,6 +21,11 @@ public static class OnchainSwapInvoicePolicy
     public static bool CoversCheckout(long quoteValidUntil, DateTimeOffset invoiceExpiry) =>
         quoteValidUntil >= invoiceExpiry.ToUnixTimeSeconds();
 
+    // BTCPay has no field for a fee the merchant bears — PaymentMethodFee is added to what the payer
+    // owes, and booking one here would leave the invoice underpaid — so this is for display only.
+    public static long? SolverFee(long? creditedGrossSats, long landedSats) =>
+        creditedGrossSats is { } gross && gross > landedSats ? gross - landedSats : null;
+
     // A funded HTLC keeps the invoice open until the swap's claim deadline, the last moment it can be paid.
     public static TimeSpan? ExtensionFor(DateTimeOffset invoiceExpiry, DateTimeOffset now, long claimDeadline)
     {

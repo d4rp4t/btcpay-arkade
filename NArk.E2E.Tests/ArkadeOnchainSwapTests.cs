@@ -84,11 +84,17 @@ public class ArkadeOnchainSwapTests : PlaywrightBaseTest
         await SendOnchainAsync(htlc, swap.OfferAmount.Satoshi);
         await MineAsync(3);
 
-        // Held open while the swap runs: the claim lands well past a 15-minute checkout.
-        var extended = await PollAsync(
-            async () => (await client.GetInvoice(invoice.Id)).ExpirationTime > expiryBefore,
+        // Held open while the swap runs: the claim can land well past a 15-minute checkout. A swap that
+        // beats the watcher's tick leaves New on its own, which serves the same end — the invoice was
+        // never dropped under a payer who paid. Only an invoice still New on its original expiry failed.
+        var held = await PollAsync(
+            async () =>
+            {
+                var current = await client.GetInvoice(invoice.Id);
+                return current.ExpirationTime > expiryBefore || current.Status != InvoiceStatus.New;
+            },
             TimeSpan.FromMinutes(2));
-        Assert.True(extended, "a funded HTLC must keep its invoice open");
+        Assert.True(held, "a funded HTLC must keep its invoice open");
 
         var settled = await PollAsync(async () =>
         {

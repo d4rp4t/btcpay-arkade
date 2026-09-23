@@ -152,7 +152,9 @@ public class ArkContractInvoiceListener(
     private async Task HandlePaymentData(VtxoEntity vtxo, InvoiceEntity invoice, ArkadePaymentMethodHandler handler, string? destination = null, bool isConfirmed = true, bool isBoarding = false, long? creditSats = null)
     {
         var pmi = ArkadePlugin.ArkadePaymentMethodId;
-        var details = new ArkadePaymentData($"{vtxo.TransactionId}:{vtxo.TransactionOutputIndex}", destination, isBoarding);
+        var details = new ArkadePaymentData(
+            $"{vtxo.TransactionId}:{vtxo.TransactionOutputIndex}", destination, isBoarding,
+            OnchainSwapInvoicePolicy.SolverFee(creditSats, vtxo.Amount));
         var status = isConfirmed ? PaymentStatus.Settled : PaymentStatus.Processing;
 
         // Serialize payment registration to prevent duplicate inserts from concurrent VTXO events
