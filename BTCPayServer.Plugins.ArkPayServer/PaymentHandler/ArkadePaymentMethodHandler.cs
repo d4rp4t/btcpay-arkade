@@ -197,7 +197,7 @@ public class ArkadePaymentMethodHandler(
                     walletId, amountSats, transport, covclaimd, refundDestination,
                     amountSide: RfqAmountSide.From, solverCard: card,
                     payoutContract: payoutContract, cancellationToken: timeout.Token),
-                timeout.Token);
+                timeout.Token, fallBack: true);
         }
         catch (Exception e)
         {

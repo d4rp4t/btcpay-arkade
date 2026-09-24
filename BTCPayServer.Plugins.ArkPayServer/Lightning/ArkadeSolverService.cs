@@ -35,24 +35,57 @@ public class ArkadeSolverService(
     public Task<T> WithTransportAsync<T>(
         long amountSats,
         Func<IRfqTransport, SolverCard?, Task<T>> negotiate,
-        CancellationToken cancellationToken = default) =>
-        WithTransportAsync(amountSats, ArkadeSolverSelector.LightningCorridor, negotiate, cancellationToken);
+        CancellationToken cancellationToken = default,
+        bool fallBack = false) =>
+        WithTransportAsync(
+            amountSats, ArkadeSolverSelector.LightningCorridor, negotiate, cancellationToken, fallBack);
 
     // Asked for by name: a solver listed for Lightning never agreed to watch an onchain address.
+    // fallBack is the caller's to grant, and only a negotiation that commits nothing may: a retry after
+    // a lockup was funded would fund a second one.
     public async Task<T> WithTransportAsync<T>(
         long amountSats,
         string quoteCorridor,
         Func<IRfqTransport, SolverCard?, Task<T>> negotiate,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool fallBack = false)
     {
-        var rendezvous = await selector.SelectAsync(amountSats, quoteCorridor, cancellationToken)
-            ?? throw new InvalidOperationException(
+        var candidates = await selector.CandidatesAsync(amountSats, quoteCorridor, cancellationToken);
+        if (candidates.Count == 0)
+        {
+            throw new InvalidOperationException(
                 $"No Arkade swap solver is listed for the {quoteCorridor} corridor on this network, " +
                 "and none is named in the Arkade network configuration. Set solver-relay and " +
                 "solver-pubkey to name one directly.");
+        }
 
-        using var transport = new FeeCappedRfqTransport(Open(rendezvous), options.MaxFeeOn);
-        return await negotiate(transport, rendezvous.Card);
+        return await NegotiateAcrossAsync(
+            fallBack ? candidates : [candidates[0]], negotiate, cancellationToken);
+    }
+
+    /// <summary>Tries each way of reaching a solver in turn, and reports the last refusal if none works.</summary>
+    public async Task<T> NegotiateAcrossAsync<T>(
+        IReadOnlyList<SolverRendezvous> candidates,
+        Func<IRfqTransport, SolverCard?, Task<T>> negotiate,
+        CancellationToken cancellationToken = default)
+    {
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                using var transport = new FeeCappedRfqTransport(Open(candidates[i]), options.MaxFeeOn);
+                return await negotiate(transport, candidates[i].Card);
+            }
+            catch (Exception e) when (e is not OperationCanceledException && i < candidates.Count - 1)
+            {
+                logger.LogWarning(e,
+                    "Arkade solver at {Relay} did not quote; trying the next of {Count}",
+                    candidates[i].Relay, candidates.Count);
+            }
+        }
+
+        throw new InvalidOperationException("No Arkade swap solver could be reached.");
     }
 
     // The scheme picks the transport; a discovered solver is always reached over a relay, which is also

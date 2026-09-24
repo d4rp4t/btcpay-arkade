@@ -52,22 +52,34 @@ public sealed class ArkadeSolverSelector(
             return new SolverRendezvous(options.SolverPubkey ?? "", configured, null);
         }
 
-        var market = (await MarketsAsync(quoteCorridor, cancellationToken))
-            .OrderBy(m => m.TotalFeeOn(amountSats))
-            .ThenBy(m => m.FeeBps)
-            .FirstOrDefault();
+        return (await CandidatesAsync(amountSats, quoteCorridor, cancellationToken)).FirstOrDefault();
+    }
 
-        if (market?.DiscoveryPubkey is not { Length: > 0 } pubkey)
+    /// <summary>
+    /// Every way to reach a solver for this corridor, cheapest first, then each solver's relays in the
+    /// order it lists them. One unreachable relay — or one solver that is down — is then a step to the
+    /// next rather than the end of the attempt.
+    /// </summary>
+    public async Task<IReadOnlyList<SolverRendezvous>> CandidatesAsync(
+        long amountSats, string quoteCorridor, CancellationToken cancellationToken = default)
+    {
+        if (HasExplicitSolver && Uri.TryCreate(options.RelayUri, UriKind.Absolute, out var configured))
         {
-            return null;
+            return [new SolverRendezvous(options.SolverPubkey ?? "", configured, null)];
         }
 
-        // The relay list is a stranger's data; an unparseable entry drops the candidate rather than throwing.
-        return market.Transports?.Nostr?.Relays
-            .Select(r => Uri.TryCreate(r, UriKind.Absolute, out var parsed) ? parsed : null)
-            .FirstOrDefault(r => r is not null) is { } relay
-            ? new SolverRendezvous(pubkey, relay, market)
-            : null;
+        return
+        [
+            .. (await MarketsAsync(quoteCorridor, cancellationToken))
+                .OrderBy(m => m.TotalFeeOn(amountSats))
+                .ThenBy(m => m.FeeBps)
+                .Where(m => m.DiscoveryPubkey is { Length: > 0 })
+                // The relay list is a stranger's data; an unparseable entry drops that relay, not the solver.
+                .SelectMany(m => (m.Transports?.Nostr?.Relays ?? [])
+                    .Select(r => Uri.TryCreate(r, UriKind.Absolute, out var parsed) ? parsed : null)
+                    .Where(r => r is not null)
+                    .Select(r => new SolverRendezvous(m.DiscoveryPubkey!, r!, m)))
+        ];
     }
 
     public Task<bool> HasLightningSolverAsync(CancellationToken cancellationToken = default) =>

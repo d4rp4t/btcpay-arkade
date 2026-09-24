@@ -161,10 +161,12 @@ public class ArkLightningClient(
         var amountSide = ArkadeSwapFeePayerSetting.AmountSide(
             await ArkadeSwapFeePayerSetting.ReadAsync(walletStorage, walletId, cancellation));
 
+        // Safe to try another solver: a receive negotiation commits nothing of ours — the solver funds
+        // the lockup, and the swap is recorded only once a quote comes back.
         var pending = await solver.WithTransportAsync(amountSats, (transport, card) =>
             intents.ReceiveFromLightningAsync(
                 walletId, amountSats, transport, claimRecipient, card,
-                amountSide: amountSide, cancellationToken: cancellation), cancellation);
+                amountSide: amountSide, cancellationToken: cancellation), cancellation, fallBack: true);
 
         var intent = await GetIntentAsync(pending.RfqId, cancellation)
             ?? throw new InvalidOperationException(
