@@ -21,14 +21,14 @@ public class ArkadeSolverSelectorTests
     [InlineData("mainnet")]
     [InlineData("mutinynet")]
     [Trait("Category", "SolverPresets")]
-    public void A_hosted_network_ships_its_emulator_endpoint(string network)
+    public void A_hosted_network_has_a_pinned_emulator_key(string network)
     {
-        // An empty preset silently turns Lightning off, since HasEmulator gates discovery too.
+        // Without one the corridors cannot build their covenants, so they do not register at all.
         var chain = network == "mainnet"
             ? Bitcoin.Instance.Mainnet.ChainName
             : Bitcoin.Instance.Mutinynet.ChainName;
 
-        Assert.True(ArkadeSolverOptions.ForNetwork(chain).HasEmulator);
+        Assert.True(ArkadeSolverOptions.HasPinnedEmulatorKey(chain));
     }
 
     [Fact]
