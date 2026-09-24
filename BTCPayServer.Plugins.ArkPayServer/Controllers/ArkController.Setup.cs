@@ -20,7 +20,7 @@ public partial class ArkController
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public IActionResult InitialSetup(string storeId)
     {
-        var store = HttpContext.GetStoreData();
+        var store = HttpContext.GetStoreDataOrNull();
         if (store == null)
             return NotFound();
 
@@ -38,7 +38,7 @@ public partial class ArkController
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Cookie)]
     public async Task<IActionResult> InitialSetup(string storeId, InitialWalletSetupViewModel model)
     {
-        var store = HttpContext.GetStoreData();
+        var store = HttpContext.GetStoreDataOrNull();
         if (store == null)
             return NotFound();
 

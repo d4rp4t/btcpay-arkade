@@ -55,7 +55,7 @@ public partial class ArkGreenfieldController
     [Authorize(Policy = Policies.CanViewStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Greenfield)]
     public async Task<IActionResult> GetStatus(string storeId, CancellationToken cancellationToken)
     {
-        var store = HttpContext.GetStoreData();
+        var store = HttpContext.GetStoreDataOrNull();
         if (store == null) return NotFound();
 
         var config = GetConfig<ArkadePaymentMethodConfig>(ArkadePlugin.ArkadePaymentMethodId, store);

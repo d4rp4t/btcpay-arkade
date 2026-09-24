@@ -86,7 +86,7 @@ public partial class ArkController
         if (string.IsNullOrWhiteSpace(model.Destination))
             return BadRequest();
 
-        var store = HttpContext.GetStoreData();
+        var store = HttpContext.GetStoreDataOrNull();
         if (store == null)
             return NotFound();
 

@@ -72,7 +72,7 @@ public partial class ArkGreenfieldController
     public async Task<IActionResult> SetupWallet(string storeId, [FromBody] ArkWalletSetupRequest request,
         CancellationToken cancellationToken)
     {
-        var store = HttpContext.GetStoreData();
+        var store = HttpContext.GetStoreDataOrNull();
         if (store == null) return NotFound();
 
         var existingConfig = GetConfig<ArkadePaymentMethodConfig>(ArkadePlugin.ArkadePaymentMethodId, store);
@@ -148,7 +148,7 @@ public partial class ArkGreenfieldController
     public async Task<IActionResult> UpdateWalletSettings(string storeId,
         [FromBody] ArkWalletSettingsRequest request, CancellationToken cancellationToken)
     {
-        var store = HttpContext.GetStoreData();
+        var store = HttpContext.GetStoreDataOrNull();
         if (store == null) return NotFound();
 
         var (config, error) = GetStoreConfig();
@@ -234,7 +234,7 @@ public partial class ArkGreenfieldController
     [Authorize(Policy = Policies.CanModifyStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Greenfield)]
     public async Task<IActionResult> RemoveWallet(string storeId, CancellationToken cancellationToken)
     {
-        var store = HttpContext.GetStoreData();
+        var store = HttpContext.GetStoreDataOrNull();
         if (store == null) return NotFound();
 
         var (config, error) = GetStoreConfig();

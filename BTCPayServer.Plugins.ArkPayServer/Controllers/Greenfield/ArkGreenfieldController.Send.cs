@@ -37,9 +37,12 @@ public partial class ArkGreenfieldController
 
         try
         {
-            var store = HttpContext.GetStoreData();
+            var store = HttpContext.GetStoreDataOrNull();
+            if (store is null)
+                return this.CreateAPIError(404, "store-not-found", "Store not found.");
+
             var txId = await arkadeSpendingService.Spend(
-                store!,
+                store,
                 request.Destination,
                 request.AmountSats,
                 request.InputOutpoints,

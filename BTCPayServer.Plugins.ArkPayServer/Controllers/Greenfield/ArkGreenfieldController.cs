@@ -59,13 +59,13 @@ public partial class ArkGreenfieldController(
     ArkadeSolverService arkadeSolver,
     ArkadeSwapRefresher swapRefresher) : ControllerBase
 {
-    private string? CurrentStoreId => HttpContext.GetStoreData()?.Id;
+    private string? CurrentStoreId => HttpContext.GetStoreDataOrNull()?.Id;
 
     #region Helpers
 
     private (ArkadePaymentMethodConfig? config, IActionResult? error) GetStoreConfig()
     {
-        var store = HttpContext.GetStoreData();
+        var store = HttpContext.GetStoreDataOrNull();
         if (store == null)
             return (null, this.CreateAPIError(404, "store-not-found", "Store not found."));
 
@@ -84,7 +84,7 @@ public partial class ArkGreenfieldController(
 
     private bool IsArkadeLightningEnabled()
     {
-        var store = HttpContext.GetStoreData();
+        var store = HttpContext.GetStoreDataOrNull();
         if (store == null) return false;
         var lnConfig = store.GetPaymentMethodConfig<LightningPaymentMethodConfig>(
             PaymentTypes.LN.GetPaymentMethodId("BTC"), paymentMethodHandlerDictionary);
@@ -277,3 +277,5 @@ public partial class ArkGreenfieldController(
 
     #endregion
 }
+
+

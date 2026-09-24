@@ -17,7 +17,7 @@ public partial class ArkGreenfieldController
     /// none to publish: an Arkade solver quotes its terms per request over RFQ, so the only way to
     /// state a minimum, a maximum or a fee would be to open a negotiation on behalf of a caller that
     /// asked a read-only question. What a caller can act on is whether a corridor exists at all and
-    /// in which directions, which is what this returns.
+    /// in which directions, which is what this returns.r
     /// </remarks>
     [HttpGet("~/api/v1/stores/{storeId}/arkade/lightning-solver")]
     [Authorize(Policy = Policies.CanViewStoreSettings, AuthenticationSchemes = AuthenticationSchemes.Greenfield)]

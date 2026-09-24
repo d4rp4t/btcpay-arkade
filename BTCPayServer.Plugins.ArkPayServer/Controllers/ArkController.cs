@@ -171,9 +171,9 @@ public partial class ArkController(
     
     private bool IsArkadeLightningEnabled()
     {
-        var store = HttpContext.GetStoreData();
-        var lnConfig =
-            store.GetPaymentMethodConfig<LightningPaymentMethodConfig>(GetLightningPaymentMethod(), paymentMethodHandlerDictionary);
+        var lnConfig = HttpContext.GetStoreDataOrNull()
+            ?.GetPaymentMethodConfig<LightningPaymentMethodConfig>(
+                GetLightningPaymentMethod(), paymentMethodHandlerDictionary);
         var lnEnabled =
             lnConfig?.ConnectionString?.StartsWith("type=arkade", StringComparison.InvariantCultureIgnoreCase) is true;
         return lnEnabled;
@@ -360,7 +360,7 @@ public partial class ArkController(
     private async Task<(StoreData? store, ArkadePaymentMethodConfig? config, IActionResult? errorResult)>
         ValidateStoreAndConfig(bool requireOwnedByStore = false)
     {
-        var store = HttpContext.GetStoreData();
+        var store = HttpContext.GetStoreDataOrNull();
         if (store == null)
             return (null, null, NotFound());
 
