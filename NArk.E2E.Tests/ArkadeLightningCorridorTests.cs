@@ -331,6 +331,30 @@ public class ArkadeLightningCorridorTests : PlaywrightBaseTest
             $"a store without the spend-key paid from somebody else's wallet (HTTP {refused.Status})");
     }
 
+    // The claim needs the wallet's signature and nothing else does it for us yet, so the invoice is
+    // refused rather than taken and left unclaimable.
+    [Fact]
+    public async Task AWatchOnlyWallet_IsRefusedAnInvoiceItCouldNotClaim()
+    {
+        RequireSolver();
+
+        _fixture.Initialize(this);
+        await InitializePlaywright(_fixture.ServerTester!);
+        await GoToUrl("/register");
+        await RegisterNewUser(isAdmin: true);
+
+        var storeId = await CreateStoreWithWatchOnlyWalletAsync($"tr({new Key().PubKey.ToHex()})");
+        var client = new BTCPayServerClient(ServerUri, CreatedUser, Password);
+        await EnableLightningAsync(storeId);
+
+        var ex = await Assert.ThrowsAnyAsync<Exception>(() =>
+            CreateLightningInvoiceAsync(client, storeId, 25_000));
+
+        // A refusal from the server, not a timeout waiting for a destination that never appears —
+        // those have different causes and only one of them is this guard.
+        Assert.IsType<GreenfieldAPIException>(ex);
+    }
+
     [Fact]
     public async Task LightningSwapsPage_ShowsASwapTheStoreJustMade()
     {
