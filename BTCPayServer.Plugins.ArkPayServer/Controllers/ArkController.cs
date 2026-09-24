@@ -106,7 +106,13 @@ public partial class ArkController(
         var (store, config, errorResult) = await ValidateStoreAndConfig(requireOwnedByStore: true);
         if (errorResult != null) return errorResult;
 
-        await spendKeyService.RegenerateAsync(config!.WalletId, HttpContext.RequestAborted);
+        // Named before the key changes, because afterwards nothing tells them apart from a store that
+        // never had it. Warn rather than block: sharing is what the one-key-per-wallet design is for,
+        // and rotating is what you do when the key leaked — re-issuing to every holder would hand the
+        // new one to whoever leaked it.
+        var sharing = await StoresSharingSpendKeyAsync(config!.WalletId, storeId);
+
+        await spendKeyService.RegenerateAsync(config.WalletId, HttpContext.RequestAborted);
 
         // Re-issue this store's own connection string so it keeps working with the new value.
         var lightningPaymentMethodId = GetLightningPaymentMethod();
@@ -121,8 +127,36 @@ public partial class ArkController(
         }
 
         return RedirectWithSuccess(nameof(StoreOverview),
-            "Spend key regenerated. Connection strings shared with other stores must be updated.",
+            sharing.Count == 0
+                ? "Spend key regenerated. No other store was using the old one."
+                : $"Spend key regenerated. {sharing.Count} other store(s) can no longer pay from this "
+                  + $"wallet until their connection string is updated: {string.Join(", ", sharing)}.",
             new { storeId });
+    }
+
+    /// <summary>Stores other than <paramref name="exceptStoreId"/> whose Arkade Lightning connection
+    /// string spends from <paramref name="walletId"/>.</summary>
+    private async Task<IReadOnlyList<string>> StoresSharingSpendKeyAsync(string walletId, string exceptStoreId)
+    {
+        var lightningPaymentMethodId = GetLightningPaymentMethod();
+        var names = new List<string>();
+
+        foreach (var other in await storeRepository.GetStores())
+        {
+            if (other.Id == exceptStoreId) continue;
+
+            var connectionString = other
+                .GetPaymentMethodConfig<LightningPaymentMethodConfig>(
+                    lightningPaymentMethodId, paymentMethodHandlerDictionary)?.ConnectionString;
+
+            if (connectionString?.Contains($"wallet-id={walletId}", StringComparison.InvariantCultureIgnoreCase) is true
+                && connectionString.Contains("spend-key=", StringComparison.InvariantCultureIgnoreCase))
+            {
+                names.Add(other.StoreName);
+            }
+        }
+
+        return names;
     }
 
     /// <summary>
