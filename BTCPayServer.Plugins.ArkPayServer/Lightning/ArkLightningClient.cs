@@ -32,6 +32,7 @@ public class ArkLightningClient(
     ArkLightningSpendCapability spendCapability,
     ArkLightningSpendKeyService spendKeyService,
     IWalletStorage walletStorage,
+    IWalletProvider walletProvider,
     ArkadeIntentsService? intents = null,
     ArkadeSolverService? solver = null,
     IArkadeIntentStorage? intentStorage = null) : IExtendedLightningClient
@@ -54,6 +55,18 @@ public class ArkLightningClient(
             "capability was presented.", walletId);
         throw new UnauthorizedAccessException(
             "This store is not authorised to spend from the configured Arkade wallet.");
+    }
+
+    // No signer means no claim: we do not spend the signerless leaf, and no covclaimd does it for us.
+    // TODO: drop once covclaimd claims for us, or an emulator enables SignerlessFallback.
+    private async Task EnsureCanClaim(CancellationToken cancellation)
+    {
+        if (await walletProvider.GetSignerAsync(walletId, cancellation) is not null)
+            return;
+
+        throw new NotSupportedException(
+            "This Arkade wallet cannot sign, so a Lightning payment to it could not be claimed. " +
+            "Import it with its key, or connect the BTCPay App companion plugin to sign remotely.");
     }
 
     // Without an emulator the corridor services are absent from the container, not merely idle.
@@ -132,6 +145,8 @@ public class ArkLightningClient(
     public async Task<LightningInvoice> CreateInvoice(
         CreateInvoiceParams createInvoiceRequest, CancellationToken cancellation = default)
     {
+        await EnsureCanClaim(cancellation);
+
         var (intents, solver, _) = Corridors;
 
         var terms = await clientTransport.GetServerInfoAsync(cancellation);
